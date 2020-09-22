@@ -29,10 +29,10 @@ func TestPublishMessage(t *testing.T) {
 			return nil
 		},
 	})
-	res, err := PublishMessage(context.Background(), PublishMessageRequest{
+	res, err := PubMessage(context.Background(), PublishMessageRequest{
 		Msg:    "hello",
 		Topic:  "TOPIC_2",
-		Offset:  200,
+		Offset: 200,
 	})
 
 	if err != nil {
