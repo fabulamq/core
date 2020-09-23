@@ -55,7 +55,8 @@ func Start(ctx context.Context) (*controller, error) {
 			case s := <-addSubscribersChan:
 				writeToSubscriber(s)
 				readFromSubscriber(s, newMessageChan)
-				err = services.Get().Write(s.ctx, s.Conn, []byte("ok\n"))
+				removeSubscriber(s)
+				err = services.Get().Write(s.ctx, s.conn, []byte("ok\n"))
 				if err != nil {
 					s.cancel()
 					return
@@ -63,6 +64,7 @@ func Start(ctx context.Context) (*controller, error) {
 				subscribersInfo = append(subscribersInfo, s)
 			case msg := <-newMessageChan:
 				newMessageStep(ctx, queueFile, offset, msg, pubMessageChan)
+				offset++
 			case msg := <-pubMessageChan:
 				pubMessageStep(msg, subscribersInfo)
 			case <-ctx.Done():
@@ -73,6 +75,17 @@ func Start(ctx context.Context) (*controller, error) {
 	return &controller{
 		subsInfo: addSubscribersChan,
 	}, nil
+}
+
+func removeSubscriber(sub *subscriberInfo) {
+	go func() {
+		select {
+		case <-sub.ctx.Done():
+			log.Println("domain.addSubscribersChan.exit: ", sub.ID)
+			sub.conn.Close()
+			return
+		}
+	}()
 }
 
 func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg NewMessage, pubMessageChan chan PubMessage) {
@@ -87,13 +100,13 @@ func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg 
 	if err != nil {
 		return
 	}
-	offset++
 	mutex.Unlock()
 
 	go func() {
 		pubMessageChan <- PubMessage{
 			Topic:   msg.Topic,
 			Message: msg.Message,
+			Offset:  offset,
 		}
 	}()
 }
@@ -108,9 +121,6 @@ func pubMessageStep(msg PubMessage, subscribersInfo []*subscriberInfo) {
 	}
 }
 
-func sendOkToSubscriber(sub *subscriberInfo) {
-
-}
 func writeToSubscriber(sub *subscriberInfo) {
 	log.Println("domain.writeToSubscriber: ", sub.ID, sub.Ch)
 	// subscriber read message
@@ -118,14 +128,16 @@ func writeToSubscriber(sub *subscriberInfo) {
 		for {
 			select {
 			case msg := <-sub.outbound:
+				if (sub.offset - 1) != msg.Offset {
+					sub.cancel()
+					return
+				}
 				log.Println("write to subscriber: ", sub.ID, sub.Ch, msg)
-				err := services.Get().Write(sub.ctx, sub.Conn, msg.write())
+				err := services.Get().Write(sub.ctx, sub.conn, msg.write())
 				if err != nil {
 					return
 				}
-			case <-sub.ctx.Done():
-				log.Println("domain.addSubscribersChan.exit: ", sub.ID)
-				return
+				sub.offset++
 			}
 		}
 	}()
@@ -135,7 +147,7 @@ func readFromSubscriber(sub *subscriberInfo, newMessageChan chan NewMessage) {
 	// read from subscriber
 	go func() {
 		for {
-			line, err := services.Get().ReadLine(sub.ctx, sub.Conn)
+			line, err := services.Get().ReadLine(sub.ctx, sub.conn)
 			log.Println("domain.readFromSubscriber: ", sub.ID, sub.Ch)
 			if err != nil {
 				sub.cancel()
@@ -154,5 +166,5 @@ func readFromSubscriber(sub *subscriberInfo, newMessageChan chan NewMessage) {
 }
 
 func getCurrentOffset() uint64 {
-	return uint64(256)
+	return uint64(0)
 }

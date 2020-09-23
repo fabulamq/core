@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestApi(t *testing.T) {
+func setup(t *testing.T) {
 	services.Setup(services.Services{
 		GetConsumers: nil,
 		Write: func(ctx context.Context, c net.Conn, msg []byte) error {
@@ -36,12 +36,20 @@ func TestApi(t *testing.T) {
 			return "", fmt.Errorf("connection closed")
 		},
 	})
+}
+
+func TestApi(t *testing.T) {
+	setup(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	err, isReady := Start(ctx)
 	assert.NoError(t, err)
 	<-isReady
 
+	//cli, _ := gozeusmq.New(gozeusmq.Config{Host: "localhost:9998", ID:"id1", Ch:"ch1"})
+	//cli.Handle("topic-1", func(s string) error {
+	//	return nil
+	//})
 	conn1 := newConnection(t)
 	conn2 := newConnection(t)
 	conn1.Write([]byte("{\"ID\":\"id1\", \"Ch\":\"ch1\"}\n"))
@@ -49,15 +57,23 @@ func TestApi(t *testing.T) {
 	services.Get().ReadLine(ctx, conn1)
 	services.Get().ReadLine(ctx, conn2)
 
-	_, err = conn1.Write([]byte("{\"Topic\":\"topic-1\",\"Message\":\"hello\"}\n"))
-	assert.NoError(t, err)
-	{
-		txt, _ := services.Get().ReadLine(ctx, conn1)
-		fmt.Println("final text: ", txt)
-	}
-	{
-		txt, _ := services.Get().ReadLine(ctx, conn2)
-		fmt.Println("final text: ", txt)
+	i := 0
+	for {
+		msg := fmt.Sprintf("{\"Topic\":\"topic-1\",\"Message\":\"msg_%d\"}\n", i)
+		_, err = conn1.Write([]byte(msg))
+		assert.NoError(t, err)
+		{
+			txt, _ := services.Get().ReadLine(ctx, conn1)
+			fmt.Println("final text: ", txt)
+		}
+		{
+			txt, _ := services.Get().ReadLine(ctx, conn2)
+			fmt.Println("final text: ", txt)
+		}
+		if i == 20 {
+			break
+		}
+		i++
 	}
 	cancel()
 }

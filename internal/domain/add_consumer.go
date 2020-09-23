@@ -16,8 +16,8 @@ type subscriberInfo struct {
 	ID       string
 	Ch       string
 	Topics   []string
-	offset   chan uint64
-	Conn     net.Conn
+	offset   uint64
+	conn     net.Conn
 	outbound chan PubMessage
 	ctx      context.Context
 	cancel   func()
@@ -31,10 +31,11 @@ type NewMessage struct {
 type PubMessage struct {
 	Topic   string
 	Message string
+	Offset  uint64
 }
 
 func (pb PubMessage) write() []byte {
-	return []byte(fmt.Sprintf("{\"topic\":\"%s\", \"message\":\"%s\"}\n", pb.Topic, pb.Message))
+	return []byte(fmt.Sprintf("{\"topic\":\"%s\", \"offset\":%d,\"message\":\"%s\"}\n", pb.Topic, pb.Offset, pb.Message))
 }
 
 func (c controller) InitSubscriber(ctx context.Context, conn net.Conn) error {
@@ -53,13 +54,14 @@ func (c controller) InitSubscriber(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return err
 	}
+
 	newCtx, cancel := context.WithCancel(context.Background())
 	c.subsInfo <- &subscriberInfo{
 		ID:       sTemp.ID,
 		Ch:       sTemp.Ch,
 		Topics:   sTemp.Topics,
-		offset:   nil,
-		Conn:     conn,
+		offset:   uint64(1),
+		conn:     conn,
 		outbound: make(chan PubMessage),
 		ctx:      newCtx,
 		cancel:   cancel,
