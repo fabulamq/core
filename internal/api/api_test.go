@@ -1,22 +1,21 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"github.com/go-zeusmq/pkg/gozeusmq"
 	"github.com/stretchr/testify/assert"
+	"github.com/zeusmq/internal/infra/connection"
 	"github.com/zeusmq/internal/services"
-	"log"
 	"net"
 	"os"
 	"testing"
 )
 
-func setup(t *testing.T) {
+func setup(t *testing.T) func() {
 	services.Setup(services.Services{
 		GetConsumers: nil,
 		Write: func(ctx context.Context, c net.Conn, msg []byte) error {
-			log.Println("test.Write: ", string(msg))
 			_, err := c.Write(msg)
 			return err
 		},
@@ -24,64 +23,67 @@ func setup(t *testing.T) {
 			return &os.File{}, nil
 		},
 		WriteFile: func(ctx context.Context, f *os.File, b []byte) error {
-			log.Println("test.WriteFile")
 			return nil
 		},
-		ReadLine: func(ctx context.Context, c net.Conn) (string, error) {
-			scanner := bufio.NewScanner(c)
-			scanner.Split(bufio.ScanLines)
-			if scanner.Scan() {
-				return scanner.Text(), nil
-			}
-			return "", fmt.Errorf("connection closed")
-		},
+		ReadLine: connection.ReadLine,
 	})
-}
-
-func TestApi(t *testing.T) {
-	setup(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	err, isReady := Start(ctx)
 	assert.NoError(t, err)
 	<-isReady
+	return cancel
+}
 
-	//cli, _ := gozeusmq.New(gozeusmq.Config{Host: "localhost:9998", ID:"id1", Ch:"ch1"})
-	//cli.Handle("topic-1", func(s string) error {
-	//	return nil
-	//})
-	conn1 := newConnection(t)
-	conn2 := newConnection(t)
-	conn1.Write([]byte("{\"ID\":\"id1\", \"Ch\":\"ch1\"}\n"))
-	conn2.Write([]byte("{\"ID\":\"id2\", \"Ch\":\"ch2\"}\n"))
-	services.Get().ReadLine(ctx, conn1)
-	services.Get().ReadLine(ctx, conn2)
+func TestApi(t *testing.T) {
+	setup(t)
 
+	go func() {
+		i := 0
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Host: "localhost:9998", ID: "id1", Ch: "ch1", Topic: "topic-1"})
+		err := cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			assert.Equal(t, fmt.Sprintf("msg_%d", i), req.Message)
+			i++
+			return nil
+		})
+		fmt.Println(err)
+	}()
+
+	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
 	i := 0
 	for {
-		msg := fmt.Sprintf("{\"Topic\":\"topic-1\",\"Message\":\"msg_%d\"}\n", i)
-		_, err = conn1.Write([]byte(msg))
-		assert.NoError(t, err)
-		{
-			txt, _ := services.Get().ReadLine(ctx, conn1)
-			fmt.Println("final text: ", txt)
-		}
-		{
-			txt, _ := services.Get().ReadLine(ctx, conn2)
-			fmt.Println("final text: ", txt)
-		}
+		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 		if i == 20 {
 			break
 		}
 		i++
 	}
-	cancel()
 }
 
-func newConnection(t *testing.T) net.Conn {
-	conn, err := net.Dial("tcp", "localhost:9998")
-	if err != nil {
-		assert.NoError(t, err)
+func TestApi2(t *testing.T) {
+	setup(t)
+
+	go func() {
+		i := 0
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Host: "localhost:9998", ID: "id1", Ch: "ch1", Topic: "topic-1"})
+		err := cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			assert.Equal(t, fmt.Sprintf("msg_%d", i), req.Message)
+			i++
+			if req.Message == "msg_10" {
+				return fmt.Errorf("error")
+			}
+			return nil
+		})
+		fmt.Println(err)
+	}()
+
+	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	i := 0
+	for {
+		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+		if i == 20 {
+			break
+		}
+		i++
 	}
-	return conn
 }

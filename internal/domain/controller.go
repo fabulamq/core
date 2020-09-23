@@ -25,7 +25,8 @@ func (q queueMsg) byte() []byte {
 }
 
 type controller struct {
-	subsInfo chan *subscriberInfo
+	consumerInfo chan *consumerInfo
+	producerInfo chan *producerInfo
 }
 
 func Start(ctx context.Context) (*controller, error) {
@@ -37,7 +38,9 @@ func Start(ctx context.Context) (*controller, error) {
 	started = true
 	mutex.Unlock()
 
-	addSubscribersChan := make(chan *subscriberInfo)
+	consumerInfoChanChan := make(chan *consumerInfo)
+	producerInfoChanChan := make(chan *producerInfo)
+
 	newMessageChan := make(chan NewMessage)
 	pubMessageChan := make(chan PubMessage)
 
@@ -48,19 +51,15 @@ func Start(ctx context.Context) (*controller, error) {
 		return nil, err
 	}
 
-	subscribersInfo := make([]*subscriberInfo, 0)
+	subscribersInfo := make([]*consumerInfo, 0)
 	go func() {
 		for {
 			select {
-			case s := <-addSubscribersChan:
-				writeToSubscriber(s)
-				readFromSubscriber(s, newMessageChan)
+			case s := <-producerInfoChanChan:
+				readFromProducer(s, newMessageChan)
+			case s := <-consumerInfoChanChan:
+				writeToConsumer(s)
 				removeSubscriber(s)
-				err = services.Get().Write(s.ctx, s.conn, []byte("ok\n"))
-				if err != nil {
-					s.cancel()
-					return
-				}
 				subscribersInfo = append(subscribersInfo, s)
 			case msg := <-newMessageChan:
 				newMessageStep(ctx, queueFile, offset, msg, pubMessageChan)
@@ -73,11 +72,12 @@ func Start(ctx context.Context) (*controller, error) {
 		}
 	}()
 	return &controller{
-		subsInfo: addSubscribersChan,
+		consumerInfo: consumerInfoChanChan,
+		producerInfo: producerInfoChanChan,
 	}, nil
 }
 
-func removeSubscriber(sub *subscriberInfo) {
+func removeSubscriber(sub *consumerInfo) {
 	go func() {
 		select {
 		case <-sub.ctx.Done():
@@ -100,6 +100,9 @@ func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg 
 	if err != nil {
 		return
 	}
+
+	msg.isPersisted <- true
+
 	mutex.Unlock()
 
 	go func() {
@@ -111,56 +114,76 @@ func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg 
 	}()
 }
 
-func pubMessageStep(msg PubMessage, subscribersInfo []*subscriberInfo) {
+func pubMessageStep(msg PubMessage, subscribersInfo []*consumerInfo) {
 	log.Println("domain.pubMessageStep: ", msg)
 	for i, _ := range subscribersInfo {
-		go func(sub *subscriberInfo) {
+		go func(sub *consumerInfo) {
 			log.Println("send to subscriber: ", sub.ID, sub.Ch)
 			sub.outbound <- msg
 		}(subscribersInfo[i])
 	}
 }
 
-func writeToSubscriber(sub *subscriberInfo) {
-	log.Println("domain.writeToSubscriber: ", sub.ID, sub.Ch)
-	// subscriber read message
+func writeToConsumer(sub *consumerInfo) {
+	// consumer read message
+	err := services.Get().Write(sub.ctx, sub.conn, []byte("ok\n"))
+	if err != nil {
+		sub.cancel()
+		return
+	}
 	go func() {
 		for {
 			select {
 			case msg := <-sub.outbound:
+				log.Println("domain.writeToConsumer: ", sub.ID, sub.Ch, msg.Message)
 				if (sub.offset - 1) != msg.Offset {
 					sub.cancel()
 					return
 				}
-				log.Println("write to subscriber: ", sub.ID, sub.Ch, msg)
 				err := services.Get().Write(sub.ctx, sub.conn, msg.write())
 				if err != nil {
 					return
 				}
+				//TODO check for an ACK here
 				sub.offset++
 			}
 		}
 	}()
 }
 
-func readFromSubscriber(sub *subscriberInfo, newMessageChan chan NewMessage) {
+func readFromProducer(prod *producerInfo, newMessageChan chan NewMessage) {
+	err := services.Get().Write(prod.ctx, prod.conn, []byte("ok\n"))
+	if err != nil {
+		prod.cancel()
+		return
+	}
 	// read from subscriber
 	go func() {
 		for {
-			line, err := services.Get().ReadLine(sub.ctx, sub.conn)
-			log.Println("domain.readFromSubscriber: ", sub.ID, sub.Ch)
+			line, err := services.Get().ReadLine(prod.ctx, prod.conn)
+			log.Println("domain.readFromProducer: ", line)
 			if err != nil {
-				sub.cancel()
+				prod.cancel()
 				return
 			}
-			log.Println("read subscriber message: ", line)
+			log.Println("read producer message: ", line)
 			msg := NewMessage{}
 			err = json.Unmarshal([]byte(line), &msg)
 			if err != nil {
-				sub.cancel()
+				prod.cancel()
 				return
 			}
+			msg.isPersisted = make(chan bool)
+
 			newMessageChan <- msg
+
+			// wait util message is persisted
+			<-msg.isPersisted
+			err = services.Get().Write(prod.ctx, prod.conn, []byte("ok\n"))
+			if err != nil {
+				prod.cancel()
+				return
+			}
 		}
 	}()
 }

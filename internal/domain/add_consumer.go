@@ -12,7 +12,7 @@ import (
 type AddConsumerRequest struct {
 }
 
-type subscriberInfo struct {
+type consumerInfo struct {
 	ID       string
 	Ch       string
 	Topics   []string
@@ -23,9 +23,16 @@ type subscriberInfo struct {
 	cancel   func()
 }
 
+type producerInfo struct {
+	conn   net.Conn
+	ctx    context.Context
+	cancel func()
+}
+
 type NewMessage struct {
-	Topic   string
-	Message string
+	Topic       string
+	Message     string
+	isPersisted chan bool
 }
 
 type PubMessage struct {
@@ -39,15 +46,16 @@ func (pb PubMessage) write() []byte {
 }
 
 func (c controller) InitSubscriber(ctx context.Context, conn net.Conn) error {
-	log.Println("controller.InitSubscriber")
 	line, err := services.Get().ReadLine(ctx, conn)
 	if err != nil {
 		return err
 	}
+	log.Println("controller.InitSubscriber: ", line)
 
 	sTemp := struct {
 		ID     string
 		Ch     string
+		Kind   string
 		Topics []string
 	}{}
 	err = json.Unmarshal([]byte(line), &sTemp)
@@ -56,15 +64,25 @@ func (c controller) InitSubscriber(ctx context.Context, conn net.Conn) error {
 	}
 
 	newCtx, cancel := context.WithCancel(context.Background())
-	c.subsInfo <- &subscriberInfo{
-		ID:       sTemp.ID,
-		Ch:       sTemp.Ch,
-		Topics:   sTemp.Topics,
-		offset:   uint64(1),
-		conn:     conn,
-		outbound: make(chan PubMessage),
-		ctx:      newCtx,
-		cancel:   cancel,
+	if sTemp.Kind == "c" {
+		c.consumerInfo <- &consumerInfo{
+			ID:     sTemp.ID,
+			Ch:     sTemp.Ch,
+			Topics: sTemp.Topics,
+			offset: uint64(1),
+			conn:   conn,
+
+			outbound: make(chan PubMessage),
+			ctx:      newCtx,
+			cancel:   cancel,
+		}
+	} else {
+		c.producerInfo <- &producerInfo{
+			conn:   conn,
+			ctx:    newCtx,
+			cancel: cancel,
+		}
 	}
+
 	return nil
 }
