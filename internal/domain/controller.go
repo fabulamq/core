@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/zeusmq/internal/infra/log"
 	"github.com/zeusmq/internal/services"
-	"log"
 	"os"
 	"sync"
 )
@@ -67,7 +67,7 @@ func Start(ctx context.Context) (*controller, error) {
 			case msg := <-pubMessageChan:
 				pubMessageStep(msg, subscribersInfo)
 			case <-ctx.Done():
-				log.Fatal("done ctx")
+				log.Fatal(ctx, "done ctx")
 			}
 		}
 	}()
@@ -81,7 +81,7 @@ func removeSubscriber(sub *consumerInfo) {
 	go func() {
 		select {
 		case <-sub.ctx.Done():
-			log.Println("domain.addSubscribersChan.exit: ", sub.ID)
+			log.Warn(sub.ctx, "domain.addSubscribersChan.exit", fmt.Errorf("subscriber gonne"))
 			sub.conn.Close()
 			return
 		}
@@ -89,7 +89,7 @@ func removeSubscriber(sub *consumerInfo) {
 }
 
 func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg NewMessage, pubMessageChan chan PubMessage) {
-	log.Println("new message received: ", msg)
+	log.Info(ctx, fmt.Sprintf("newMessageStep: %s", msg.Message))
 	mutex.Lock()
 	err := services.Get().WriteFile(ctx, queueFile, queueMsg{
 		Offset: offset,
@@ -115,37 +115,53 @@ func newMessageStep(ctx context.Context, queueFile *os.File, offset uint64, msg 
 }
 
 func pubMessageStep(msg PubMessage, subscribersInfo []*consumerInfo) {
-	log.Println("domain.pubMessageStep: ", msg)
 	for i, _ := range subscribersInfo {
 		go func(sub *consumerInfo) {
-			log.Println("send to subscriber: ", sub.ID, sub.Ch)
+			log.Info(sub.ctx, fmt.Sprintf("pubMessageStep: %s (%d)", msg.Message, msg.Offset))
 			sub.outbound <- msg
 		}(subscribersInfo[i])
 	}
 }
 
-func writeToConsumer(sub *consumerInfo) {
+func writeToConsumer(consumer *consumerInfo) {
 	// consumer read message
-	err := services.Get().Write(sub.ctx, sub.conn, []byte("ok\n"))
+	err := services.Get().Write(consumer.ctx, consumer.conn, []byte("ok\n"))
 	if err != nil {
-		sub.cancel()
+		log.Warn(consumer.ctx, "domain.writeToConsumer.write", err)
+		consumer.cancel()
 		return
 	}
 	go func() {
 		for {
 			select {
-			case msg := <-sub.outbound:
-				log.Println("domain.writeToConsumer: ", sub.ID, sub.Ch, msg.Message)
-				if (sub.offset - 1) != msg.Offset {
-					sub.cancel()
+			case msg := <-consumer.outbound:
+				if msg.Topic != consumer.Topic {
+					log.Info(consumer.ctx, fmt.Sprintf("domain.skipTopic: %s | %s", msg.Message, msg.Topic))
+					consumer.offset++
+					continue
+				}
+				log.Info(consumer.ctx, fmt.Sprintf("domain.writeToConsumer: %s | %s", msg.Message, msg.Topic))
+				if (consumer.offset - 1) != msg.Offset {
+					log.Warn(consumer.ctx, "domain.writeToConsumer.offset", fmt.Errorf("offset uncase c:%d|m:%d", consumer.offset, msg.Offset))
+					consumer.cancel()
 					return
 				}
-				err := services.Get().Write(sub.ctx, sub.conn, msg.write())
+				err := services.Get().Write(consumer.ctx, consumer.conn, msg.write())
 				if err != nil {
+					log.Warn(consumer.ctx, "domain.writeToConsumer.writeError", err)
+					consumer.cancel()
 					return
 				}
 				//TODO check for an ACK here
-				sub.offset++
+
+				line, err := services.Get().ReadLine(consumer.ctx, consumer.conn)
+				if line != "ok" || err != nil {
+					log.Warn(consumer.ctx, "domain.writeToConsumer.writeError", err)
+					consumer.cancel()
+					return
+				}
+
+				consumer.offset++
 			}
 		}
 	}()
@@ -161,12 +177,13 @@ func readFromProducer(prod *producerInfo, newMessageChan chan NewMessage) {
 	go func() {
 		for {
 			line, err := services.Get().ReadLine(prod.ctx, prod.conn)
-			log.Println("domain.readFromProducer: ", line)
+
+			log.Info(prod.ctx, fmt.Sprintf("domain.readFromProducer: %s", line))
 			if err != nil {
 				prod.cancel()
 				return
 			}
-			log.Println("read producer message: ", line)
+
 			msg := NewMessage{}
 			err = json.Unmarshal([]byte(line), &msg)
 			if err != nil {

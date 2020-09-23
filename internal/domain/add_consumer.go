@@ -15,7 +15,7 @@ type AddConsumerRequest struct {
 type consumerInfo struct {
 	ID       string
 	Ch       string
-	Topics   []string
+	Topic    string
 	offset   uint64
 	conn     net.Conn
 	outbound chan PubMessage
@@ -53,22 +53,24 @@ func (c controller) InitSubscriber(ctx context.Context, conn net.Conn) error {
 	log.Println("controller.InitSubscriber: ", line)
 
 	sTemp := struct {
-		ID     string
-		Ch     string
-		Kind   string
-		Topics []string
+		ID    string
+		Ch    string
+		Kind  string
+		Topic string
 	}{}
 	err = json.Unmarshal([]byte(line), &sTemp)
 	if err != nil {
 		return err
 	}
 
-	newCtx, cancel := context.WithCancel(context.Background())
+	ctxWithId := context.WithValue(context.Background(), "id", sTemp.ID)
+	ctxWithCh := context.WithValue(ctxWithId, "ch", sTemp.Ch)
+	newCtx, cancel := context.WithCancel(ctxWithCh)
 	if sTemp.Kind == "c" {
 		c.consumerInfo <- &consumerInfo{
 			ID:     sTemp.ID,
 			Ch:     sTemp.Ch,
-			Topics: sTemp.Topics,
+			Topic:  sTemp.Topic,
 			offset: uint64(1),
 			conn:   conn,
 
