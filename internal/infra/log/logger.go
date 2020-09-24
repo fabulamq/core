@@ -35,8 +35,6 @@ var (
 
 func init() {
 	defaultFields = func(ctx context.Context, f Common) Common {
-		f["ch"] = inject(ctx, "ch")
-		f["id"] = inject(ctx, "id")
 		return f
 	}
 }
@@ -68,6 +66,16 @@ func loggerInit() *logrus.Logger {
 
 func output(ctx context.Context, fieldsArr []Fields, err error) *logrus.Entry {
 	f := defaultFields(ctx, make(Common, 0))
+
+	ch := inject(ctx, "ch")
+	if ch != "" {
+		f["ch"] = ch
+	}
+
+	id := inject(ctx, "id")
+	if id != "" {
+		f["id"] = id
+	}
 
 	for _, fields := range fieldsArr {
 		if _, isSensitive := fields.(Sensitive); isSensitive && !logSensitive {

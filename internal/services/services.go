@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 )
@@ -18,10 +19,10 @@ func Get() Services {
 
 type Services struct {
 	GetConsumers       func(ctx context.Context) ([]ConsumerResponse, error)
-	Write              func(ctx context.Context, c net.Conn, msg []byte) error
+	Write              func(ctx context.Context, c io.Writer, msg []byte) error
 	OpenFile           func(ctx context.Context) (*os.File, error)
 	WriteFile          func(ctx context.Context, f *os.File, b []byte) error
-	ReadLine           func(ctx context.Context, c net.Conn) (string, error)
+	ReadLine           func(ctx context.Context, c io.Reader) ([]byte, error)
 	SaveConsumerState  func(ctx context.Context, req ConsumerStateRequest) error
 	SaveFileToPreQueue func(ctx context.Context, msg string) error
 	SaveMsgToQueue     func(ctx context.Context, req SaveMsgRequest) (SaveMsgResponse, error)
