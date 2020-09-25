@@ -22,6 +22,8 @@ type Services struct {
 	Write              func(ctx context.Context, c io.Writer, msg []byte) error
 	OpenFile           func(ctx context.Context) (*os.File, error)
 	WriteFile          func(ctx context.Context, f *os.File, b []byte) error
+	GetOffset          func() uint64
+	AddOffset          func()
 	ReadLine           func(ctx context.Context, c io.Reader) ([]byte, error)
 	SaveConsumerState  func(ctx context.Context, req ConsumerStateRequest) error
 	SaveFileToPreQueue func(ctx context.Context, msg string) error

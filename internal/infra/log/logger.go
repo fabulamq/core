@@ -47,6 +47,13 @@ func inject(ctx context.Context, key string) string {
 	return ""
 }
 
+func injectI(ctx context.Context, key string) int {
+	if v := ctx.Value(key); v != nil {
+		return v.(int)
+	}
+	return -1
+}
+
 func loggerInit() *logrus.Logger {
 	once.Do(func() {
 		logger = &logrus.Logger{

@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/zeusmq/internal/infra/log"
 	"github.com/zeusmq/internal/services"
 	"io"
@@ -32,22 +33,26 @@ type consumerInfo struct {
 
 	r *io.PipeReader
 	w *io.PipeWriter
+	m sync.Mutex
 }
+
+// reordenar
+// unlock no lugar certo
+// cid??
 
 var once = sync.Once{}
 var mapLocker = sync.Mutex{}
 var publishLocker = sync.Mutex{}
-var consumersMap map[string]map[string]*consumerInfo
+var mapRelation map[string]bool
+var consumerMap = sync.Map{}
 
 var publishReader *io.PipeReader
 var publishWriter *io.PipeWriter
-var currOffset uint64
 
 func AddConnection(conn net.Conn) {
 	once.Do(func() {
-		consumersMap = make(map[string]map[string]*consumerInfo)
+		mapRelation = make(map[string]bool)
 		publishReader, publishWriter = io.Pipe()
-		currOffset = 0
 		go publisherCentral()
 	})
 
@@ -71,7 +76,7 @@ func AddConnection(conn net.Conn) {
 		switch subInfo.Kind {
 		case "c":
 			r, w := io.Pipe()
-			c := consumerInfo{
+			c := &consumerInfo{
 				ID:    subInfo.ID,
 				Ch:    subInfo.Ch,
 				Topic: subInfo.Topic,
@@ -81,50 +86,17 @@ func AddConnection(conn net.Conn) {
 				w:     w,
 			}
 			err = consumerStep(ctx, c)
-			mapLocker.Lock()
-			delete(consumersMap[c.ID], c.Ch)
-			mapLocker.Unlock()
+			delete(mapRelation, makeKey(c))
+			consumerMap.Delete(makeKey(c))
+			c.m.Unlock()
+			log.Warn(ctx, "consumerStep.error", err)
 		case "p":
 			err = producerStep(ctx, conn)
+			log.Warn(ctx, "producerStep.err", err)
 		case "r":
 		}
 		conn.Close()
 	}()
-}
-
-func consumerStep(ctx context.Context, consInfo consumerInfo) error {
-	log.Info(ctx, "consumerStep")
-	consInfo.Conn.Write([]byte("ok\n"))
-	mapLocker.Lock()
-	if _, ok := consumersMap[consInfo.ID]; !ok {
-		consumersMap[consInfo.ID] = make(map[string]*consumerInfo)
-	}
-	consumersMap[consInfo.ID][consInfo.Ch] = &consInfo
-	mapLocker.Unlock()
-
-	for {
-		l, err := services.Get().ReadLine(ctx, consInfo.r)
-		log.Info(ctx, fmt.Sprintf("consumerStep.readLine: [%s]", l))
-		if err != nil {
-			log.Warn(ctx, "domain.writeToConsumer.readLineError", err)
-			return err
-		}
-		err = services.Get().Write(ctx, consInfo.Conn, l)
-		if err != nil {
-			log.Warn(ctx, "domain.writeToConsumer.writeError", err)
-			return err
-		}
-		consumerRes, err := services.Get().ReadLine(ctx, consInfo.Conn)
-		if err != nil {
-			log.Warn(ctx, "domain.writeToConsumer.readError", err)
-			return err
-		}
-		if string(consumerRes) != "ok" {
-			log.Warn(ctx, "domain.writeToConsumer.notOK", err)
-			return fmt.Errorf("error NOK")
-		}
-
-	}
 }
 
 func producerStep(ctx context.Context, conn net.Conn) error {
@@ -137,24 +109,25 @@ func producerStep(ctx context.Context, conn net.Conn) error {
 			return err
 		}
 
-		producerMsg = append([]byte(fmt.Sprintf("%d;", currOffset)), producerMsg...)
+		producerMsg = append([]byte(fmt.Sprintf("%d;", services.Get().GetOffset())), producerMsg...)
 		log.Info(ctx, fmt.Sprintf("producerStep.Read: [%s]", producerMsg))
 
 		// perform save here "topic:msg"
 
-		// write to publisher
-
+		// write to central publisher
 		err = services.Get().Write(ctx, publishWriter, producerMsg)
 		if err != nil {
 			return err
 		}
-		currOffset++
+		log.Info(ctx, fmt.Sprintf("producerStep.WriteToCentral: [%s]", producerMsg))
+		services.Get().AddOffset()
 		publishLocker.Unlock()
 
 		err = services.Get().Write(ctx, conn, []byte("ok"))
 		if err != nil {
 			return err
 		}
+		log.Info(ctx, fmt.Sprintf("producerStep.SendedOK: [%s]", producerMsg))
 	}
 }
 
@@ -165,13 +138,59 @@ func publisherCentral() {
 		if err != nil {
 			log.Fatal(ctx, err.Error())
 		}
-		mapLocker.Lock()
-		for id, _ := range consumersMap {
-			for ch, _ := range consumersMap[id] {
-				log.Info(consumersMap[id][ch].Ctx, fmt.Sprintf("publisherCentral: [%s]", line))
-				services.Get().Write(ctx, consumersMap[id][ch].w, line)
+		uid := uuid.New()
+		log.Info(ctx, fmt.Sprintf("publisherCentral.init: %s", uid))
+		for key, _ := range mapRelation {
+			consInfo, ok := consumerMap.Load(key)
+			if ok {
+				info := consInfo.(*consumerInfo)
+				info.m.Lock()
+				if _, ok := consumerMap.Load(key); !ok {
+					continue
+				}
+				log.Info(info.Ctx, fmt.Sprintf("publisherCentral: [%s]", line))
+				err = services.Get().Write(ctx, info.w, line)
+				if err != nil {
+					log.Warn(ctx, "publisherCentral.remove", err)
+				}
 			}
 		}
-		mapLocker.Unlock()
+
+		log.Info(ctx, fmt.Sprintf("publisherCentral.finish: %s", uid))
+	}
+}
+
+func makeKey(consInfo *consumerInfo) string {
+	return fmt.Sprintf("%s_%s", consInfo.ID, consInfo.Ch)
+}
+
+func consumerStep(ctx context.Context, consInfo *consumerInfo) error {
+	log.Info(ctx, "consumerStep")
+	consInfo.Conn.Write([]byte("ok\n"))
+
+	_, ok := consumerMap.Load(makeKey(consInfo))
+	if !ok {
+		consumerMap.Store(makeKey(consInfo), consInfo)
+	}
+	mapRelation[makeKey(consInfo)] = true
+
+	for {
+		l, err := services.Get().ReadLine(ctx, consInfo.r)
+		log.Info(ctx, fmt.Sprintf("consumerStep.readLine: [%s]", l))
+		if err != nil {
+			return err
+		}
+		err = services.Get().Write(ctx, consInfo.Conn, l)
+		if err != nil {
+			return err
+		}
+		consumerRes, err := services.Get().ReadLine(ctx, consInfo.Conn)
+		if err != nil {
+			return err
+		}
+		if string(consumerRes) != "ok" {
+			return fmt.Errorf("error NOK")
+		}
+		consInfo.m.Unlock()
 	}
 }
