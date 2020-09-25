@@ -14,6 +14,7 @@ import (
 )
 
 // go test -v ./... -p 1 -count=1
+// go test -v ./... -p 1 -count=100 -run TestApiErrorOnConsumer
 
 var offset uint64
 
@@ -51,7 +52,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func NonTestApi(t *testing.T) {
+func TestApi(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -76,6 +77,7 @@ func NonTestApi(t *testing.T) {
 		i++
 	}
 	wg.Wait()
+	offset = 0
 }
 
 func TestApiErrorOnConsumer(t *testing.T) {
@@ -122,15 +124,13 @@ func TestApiErrorOnConsumer(t *testing.T) {
 	for {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 		if i == 5 {
-			//p.Produce("topic-2", fmt.Sprintf("msg_%d", i))
+			p.Produce("topic-2", fmt.Sprintf("msg_%d", i))
 			break
 		}
 		i++
 	}
 
 	wg.Wait()
-	//cli2.Close()
-	//cli3.Close()
 
 	id2Value, _ := consumerOffset.Load("id2")
 	//id3Value, _ := consumerOffset.Load("id3")

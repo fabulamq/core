@@ -41,18 +41,20 @@ type consumerInfo struct {
 // cid??
 
 var once = sync.Once{}
-var mapLocker = sync.Mutex{}
+var mapLocker = sync.RWMutex{}
 var publishLocker = sync.Mutex{}
 var mapRelation map[string]bool
 var consumerMap = sync.Map{}
 
-var publishReader *io.PipeReader
-var publishWriter *io.PipeWriter
+//var publishReader *io.PipeReader
+//var publishWriter *io.PipeWriter
+var msgChan chan []byte
 
 func AddConnection(conn net.Conn) {
 	once.Do(func() {
 		mapRelation = make(map[string]bool)
-		publishReader, publishWriter = io.Pipe()
+		msgChan = make(chan []byte)
+		//publishReader, publishWriter = io.Pipe()
 		go publisherCentral()
 	})
 
@@ -86,12 +88,12 @@ func AddConnection(conn net.Conn) {
 				w:     w,
 			}
 			err = consumerStep(ctx, c)
-			delete(mapRelation, makeKey(c))
 			consumerMap.Delete(makeKey(c))
 			c.m.Unlock()
 			log.Warn(ctx, "consumerStep.error", err)
 		case "p":
 			err = producerStep(ctx, conn)
+			publishLocker.Unlock()
 			log.Warn(ctx, "producerStep.err", err)
 		case "r":
 		}
@@ -115,10 +117,8 @@ func producerStep(ctx context.Context, conn net.Conn) error {
 		// perform save here "topic:msg"
 
 		// write to central publisher
-		err = services.Get().Write(ctx, publishWriter, producerMsg)
-		if err != nil {
-			return err
-		}
+		msgChan <- producerMsg
+
 		log.Info(ctx, fmt.Sprintf("producerStep.WriteToCentral: [%s]", producerMsg))
 		services.Get().AddOffset()
 		publishLocker.Unlock()
@@ -134,10 +134,7 @@ func producerStep(ctx context.Context, conn net.Conn) error {
 func publisherCentral() {
 	ctx := context.Background()
 	for {
-		line, err := services.Get().ReadLine(context.Background(), publishReader)
-		if err != nil {
-			log.Fatal(ctx, err.Error())
-		}
+		line := <-msgChan
 		uid := uuid.New()
 		log.Info(ctx, fmt.Sprintf("publisherCentral.init: %s", uid))
 		for key, _ := range mapRelation {
@@ -149,7 +146,7 @@ func publisherCentral() {
 					continue
 				}
 				log.Info(info.Ctx, fmt.Sprintf("publisherCentral: [%s]", line))
-				err = services.Get().Write(ctx, info.w, line)
+				err := services.Get().Write(ctx, info.w, line)
 				if err != nil {
 					log.Warn(ctx, "publisherCentral.remove", err)
 				}
@@ -173,7 +170,6 @@ func consumerStep(ctx context.Context, consInfo *consumerInfo) error {
 		consumerMap.Store(makeKey(consInfo), consInfo)
 	}
 	mapRelation[makeKey(consInfo)] = true
-
 	for {
 		l, err := services.Get().ReadLine(ctx, consInfo.r)
 		log.Info(ctx, fmt.Sprintf("consumerStep.readLine: [%s]", l))
