@@ -3,20 +3,19 @@ package domain
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/zeusmq/internal/infra/log"
 	"github.com/zeusmq/internal/services"
-	"io"
 	"net"
 	"strings"
 	"sync"
 )
 
 type subscriberInfo struct {
-	ID    string
-	Ch    string
-	Kind  string
-	Topic string
+	ID       string
+	Ch       string
+	Kind     string
+	Topic    string
+	Strategy string
 }
 
 type NewMessage struct {
@@ -25,15 +24,12 @@ type NewMessage struct {
 }
 
 type consumerInfo struct {
-	ID    string
-	Ch    string
-	Topic string
-	Conn  net.Conn
-	Ctx   context.Context
-
-	r *io.PipeReader
-	w *io.PipeWriter
-	m sync.Mutex
+	ID       string
+	Ch       string
+	Topic    string
+	Conn     net.Conn
+	Ctx      context.Context
+	Strategy string
 }
 
 // reordenar
@@ -41,22 +37,13 @@ type consumerInfo struct {
 // cid??
 
 var once = sync.Once{}
-var mapLocker = sync.RWMutex{}
 var publishLocker = sync.Mutex{}
-var mapRelation map[string]bool
 var consumerMap = sync.Map{}
 
-//var publishReader *io.PipeReader
-//var publishWriter *io.PipeWriter
-var msgChan chan []byte
-
 func AddConnection(conn net.Conn) {
-	once.Do(func() {
-		mapRelation = make(map[string]bool)
-		msgChan = make(chan []byte)
-		//publishReader, publishWriter = io.Pipe()
-		go publisherCentral()
-	})
+	//once.Do(func() {
+	//	msgChan = make(chan []byte)
+	//})
 
 	go func() {
 		ctx := context.Background()
@@ -67,29 +54,28 @@ func AddConnection(conn net.Conn) {
 		}
 		lineSpl := strings.Split(string(line), ";")
 		subInfo := subscriberInfo{
-			Kind:  lineSpl[0],
-			ID:    lineSpl[1],
-			Ch:    lineSpl[2],
-			Topic: lineSpl[3],
+			Kind:     lineSpl[0],
+			ID:       lineSpl[1],
+			Ch:       lineSpl[2],
+			Topic:    lineSpl[3],
+			Strategy: lineSpl[4],
 		}
 		ctxWithId := context.WithValue(context.Background(), "id", subInfo.ID)
 		ctx = context.WithValue(ctxWithId, "ch", subInfo.Ch)
 
 		switch subInfo.Kind {
 		case "c":
-			r, w := io.Pipe()
 			c := &consumerInfo{
-				ID:    subInfo.ID,
-				Ch:    subInfo.Ch,
-				Topic: subInfo.Topic,
-				Ctx:   ctx,
-				Conn:  conn,
-				r:     r,
-				w:     w,
+				ID:       subInfo.ID,
+				Ch:       subInfo.Ch,
+				Topic:    subInfo.Topic,
+				Strategy: subInfo.Strategy,
+
+				Ctx:  ctx,
+				Conn: conn,
 			}
 			err = consumerStep(ctx, c)
 			consumerMap.Delete(makeKey(c))
-			c.m.Unlock()
 			log.Warn(ctx, "consumerStep.error", err)
 		case "p":
 			err = producerStep(ctx, conn)
@@ -115,9 +101,10 @@ func producerStep(ctx context.Context, conn net.Conn) error {
 		log.Info(ctx, fmt.Sprintf("producerStep.Read: [%s]", producerMsg))
 
 		// perform save here "topic:msg"
-
-		// write to central publisher
-		msgChan <- producerMsg
+		err = services.Get().WriteFile(ctx, producerMsg)
+		if err != nil {
+			return err
+		}
 
 		log.Info(ctx, fmt.Sprintf("producerStep.WriteToCentral: [%s]", producerMsg))
 		services.Get().AddOffset()
@@ -128,32 +115,6 @@ func producerStep(ctx context.Context, conn net.Conn) error {
 			return err
 		}
 		log.Info(ctx, fmt.Sprintf("producerStep.SendedOK: [%s]", producerMsg))
-	}
-}
-
-func publisherCentral() {
-	ctx := context.Background()
-	for {
-		line := <-msgChan
-		uid := uuid.New()
-		log.Info(ctx, fmt.Sprintf("publisherCentral.init: %s", uid))
-		for key, _ := range mapRelation {
-			consInfo, ok := consumerMap.Load(key)
-			if ok {
-				info := consInfo.(*consumerInfo)
-				info.m.Lock()
-				if _, ok := consumerMap.Load(key); !ok {
-					continue
-				}
-				log.Info(info.Ctx, fmt.Sprintf("publisherCentral: [%s]", line))
-				err := services.Get().Write(ctx, info.w, line)
-				if err != nil {
-					log.Warn(ctx, "publisherCentral.remove", err)
-				}
-			}
-		}
-
-		log.Info(ctx, fmt.Sprintf("publisherCentral.finish: %s", uid))
 	}
 }
 
@@ -169,9 +130,15 @@ func consumerStep(ctx context.Context, consInfo *consumerInfo) error {
 	if !ok {
 		consumerMap.Store(makeKey(consInfo), consInfo)
 	}
-	mapRelation[makeKey(consInfo)] = true
+
+	tail, err := services.Get().TailFile()
+	if err != nil {
+		return err
+	}
+
 	for {
-		l, err := services.Get().ReadLine(ctx, consInfo.r)
+		line := <-tail
+		l := []byte(fmt.Sprintf("%s", line.Text))
 		log.Info(ctx, fmt.Sprintf("consumerStep.readLine: [%s]", l))
 		if err != nil {
 			return err
@@ -187,6 +154,6 @@ func consumerStep(ctx context.Context, consInfo *consumerInfo) error {
 		if string(consumerRes) != "ok" {
 			return fmt.Errorf("error NOK")
 		}
-		consInfo.m.Unlock()
+		log.Info(ctx, fmt.Sprintf("consumerStep.readLine.complete: [%s]", l))
 	}
 }

@@ -1,11 +1,11 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"github.com/go-zeusmq/pkg/gozeusmq"
 	"github.com/stretchr/testify/assert"
 	"github.com/zeusmq/internal/infra/connection"
+	"github.com/zeusmq/internal/infra/file"
 	"github.com/zeusmq/internal/services"
 	"os"
 	"sync"
@@ -14,28 +14,19 @@ import (
 )
 
 // go test -v ./... -p 1 -count=1
-// go test -v ./... -p 1 -count=100 -run TestApiErrorOnConsumer
-
-var offset uint64
+// go test -v ./... -p 1 -count=10000 -run TestApiErrorOnConsumer -failfast
 
 func setup() {
 
 	services.Setup(services.Services{
 		GetConsumers: nil,
+		TailFile:     file.TailFile,
 		Write:        connection.WriteLine,
-		OpenFile: func(ctx context.Context) (*os.File, error) {
-			return &os.File{}, nil
-		},
-		WriteFile: func(ctx context.Context, f *os.File, b []byte) error {
-			return nil
-		},
-		GetOffset: func() uint64 {
-			return offset
-		},
-		AddOffset: func() {
-			offset++
-		},
-		ReadLine: connection.ReadLine,
+		GetFile:      file.OpenFile,
+		WriteFile:    file.WriteFile,
+		GetOffset:    file.GetOffset,
+		AddOffset:    file.AddOffset,
+		ReadLine:     connection.ReadLine,
 	})
 
 	isReady := make(chan bool)
@@ -47,6 +38,7 @@ func setup() {
 var consumerOffset sync.Map
 
 func TestMain(m *testing.M) {
+	file.CleanFile()
 	setup()
 	code := m.Run()
 	os.Exit(code)
@@ -77,9 +69,10 @@ func TestApi(t *testing.T) {
 		i++
 	}
 	wg.Wait()
-	offset = 0
+	file.CleanFile()
 }
 
+// TODO resolver este caso com subscriber pedindo offset de mensagem... dificil
 func TestApiErrorOnConsumer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -124,7 +117,7 @@ func TestApiErrorOnConsumer(t *testing.T) {
 	for {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 		if i == 5 {
-			p.Produce("topic-2", fmt.Sprintf("msg_%d", i))
+			//p.Produce("topic-2", fmt.Sprintf("msg_%d", i))
 			break
 		}
 		i++
@@ -138,6 +131,35 @@ func TestApiErrorOnConsumer(t *testing.T) {
 	assert.Equal(t, id2Value, int64(2))
 	//assert.Equal(t, id3Value, int64(3))
 	//assert.Equal(t, id4Value, int64(6))
-	offset = 0
+	file.CleanFile()
 
+}
+
+func TestReadingFromBegining(t *testing.T) {
+	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	i := 0
+	for {
+		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+		if i == 5 {
+			break
+		}
+		i++
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Host: "localhost:9998", ID: "id1", Ch: "ch1", Topic: "topic-1"})
+	go func() {
+		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			consumerOffset.Store("id1", int64(req.Offset))
+			if req.Offset == 5 {
+				wg.Done()
+				return fmt.Errorf("error")
+			}
+			return nil
+		})
+	}()
+	wg.Wait()
+	file.CleanFile()
 }
