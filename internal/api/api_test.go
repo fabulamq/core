@@ -171,3 +171,86 @@ func TestReadingFromBegining(t *testing.T) {
 	wg.Wait()
 	//file.CleanFile()
 }
+
+func TestDifferentChannelConsumers(t *testing.T) {
+	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+
+	for i := 1; i <= 12; i++ {
+		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+	}
+	totalMsgConsumed := make(chan string)
+	lastMsg := make(chan bool)
+
+	go func() {
+		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch1", Topic: "topic-1"})
+		cli1.Handle(func(req gozeusmq.ZeusRequest) error {
+			totalMsgConsumed <- "ch_1"
+			if req.Message == "msg_12" {
+				lastMsg <- true
+			}
+			return nil
+		})
+	}()
+	go func() {
+		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch2", Topic: "topic-1"})
+		cli2.Handle(func(req gozeusmq.ZeusRequest) error {
+			totalMsgConsumed <- "ch_2"
+			if req.Message == "msg_12" {
+				lastMsg <- true
+			}
+			return nil
+		})
+	}()
+
+	go func() {
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch3", Topic: "topic-1"})
+		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			totalMsgConsumed <- "ch_3"
+			if req.Message == "msg_12" {
+				lastMsg <- true
+			}
+			return nil
+		})
+	}()
+
+	totalMap := make(map[string]int)
+	totalMsg := 0
+L:
+	for {
+		select {
+		case <-lastMsg:
+			break L
+		case id := <-totalMsgConsumed:
+			totalMap[id]++
+			totalMsg++
+		}
+	}
+	assert.Equal(t, 12, totalMsg)
+	c.file.CleanFile()
+	c.reset()
+}
+
+func TestStrategyCustomOffset(t *testing.T) {
+	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+
+	for i := 1; i <= 10; i++ {
+		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+	}
+
+	lastMsgReceived := ""
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromCurrent, Host: "localhost:9998", ID: "id_1", Ch: "ch1", Topic: "topic-1"})
+		p.Produce("topic-1", "myLastMessage")
+		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			lastMsgReceived = req.Message
+			return fmt.Errorf("error")
+		})
+		wg.Done()
+	}()
+
+	wg.Wait()
+	assert.Equal(t, "myLastMessage", lastMsgReceived)
+}
