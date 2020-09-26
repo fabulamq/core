@@ -20,8 +20,9 @@ type apiStatus struct {
 
 func Start() (*Controller, chan apiStatus) {
 	controller := &Controller{
-		file:    file{},
-		pLocker: sync.Mutex{},
+		consumerMap: sync.Map{},
+		file:        file{},
+		pLocker:     sync.Mutex{},
 	}
 	chStatus := make(chan apiStatus)
 	listener, err := net.Listen("tcp", "localhost:9998")
@@ -65,20 +66,21 @@ func (controller *Controller) start(conn net.Conn) {
 
 		switch lineSpl[0] {
 		case "c":
-			consumerInfo := &consumerInfo{
-				ID:       lineSpl[1],
-				Ch:       lineSpl[2],
-				Topic:    lineSpl[3],
-				Strategy: lineSpl[4],
-				conn:     conn,
-				Ctx:      ctx,
+			consumerInfo := &consumer{
+				ID:         lineSpl[1],
+				Ch:         lineSpl[2],
+				Topic:      lineSpl[3],
+				Strategy:   lineSpl[4],
+				conn:       conn,
+				ctx:        ctx,
+				Controller: controller,
 			}
-			err = consumerInfo.listen(ctx, controller)
-			controller.consumerMap.Delete(consumerInfo.makeKey())
+			err = consumerInfo.listen()
+			consumerInfo.remove()
 			log.Warn(ctx, "producer.listen.error", err)
 		case "p":
-			producer := producer{conn: conn}
-			err = producer.listen(ctx, controller)
+			producer := producer{conn: conn, Controller: controller, ctx: ctx}
+			err = producer.listen()
 			controller.pLocker.Unlock()
 			log.Warn(ctx, "producer.listen.err", err)
 		case "r":
@@ -89,35 +91,37 @@ func (controller *Controller) start(conn net.Conn) {
 
 type producer struct {
 	conn net.Conn
+	ctx  context.Context
+	*Controller
 }
 
-func (producer producer) listen(ctx context.Context, controller *Controller) error {
-	log.Info(ctx, "producer.listen")
+func (producer producer) listen() error {
+	log.Info(producer.ctx, "producer.listen")
 	write(producer.conn, []byte("ok"))
 	for {
 		producerMsg, err := readLine(producer.conn)
-		controller.pLocker.Lock()
+		producer.pLocker.Lock()
 		if err != nil {
 			return err
 		}
 
-		producerMsg = append([]byte(fmt.Sprintf("%d;", controller.file.GetOffset())), producerMsg...)
-		log.Info(ctx, fmt.Sprintf("producer.listen.Read: [%s]", producerMsg))
+		producerMsg = append([]byte(fmt.Sprintf("%d;", producer.file.GetOffset())), producerMsg...)
+		log.Info(producer.ctx, fmt.Sprintf("producer.listen.Read: [%s]", producerMsg))
 
 		// perform save here "topic:msg"
-		err = controller.file.WriteFile(ctx, producerMsg)
+		err = producer.file.WriteFile(producer.ctx, producerMsg)
 		if err != nil {
 			return err
 		}
 
-		controller.file.AddOffset()
+		producer.file.AddOffset()
 
 		err = write(producer.conn, []byte("ok"))
 		if err != nil {
 			return err
 		}
-		controller.pLocker.Unlock()
-		log.Info(ctx, fmt.Sprintf("producer.listen.SendedOK: [%s]", producerMsg))
+		producer.pLocker.Unlock()
+		log.Info(producer.ctx, fmt.Sprintf("producer.listen.SendedOK: [%s]", producerMsg))
 	}
 }
 
@@ -207,25 +211,34 @@ func (f *file) CleanFile() {
 	f.createFile()
 }
 
-type consumerInfo struct {
+type consumer struct {
 	ID       string
 	Ch       string
 	Topic    string
-	Ctx      context.Context
+	ctx      context.Context
 	Strategy string
 	conn     net.Conn
+
+	*Controller
 }
 
-func (consumer *consumerInfo) listen(ctx context.Context, controller *Controller) error {
-	log.Info(ctx, "consumer.listen")
+func (consumer *consumer) store() {
+	_, ok := consumer.consumerMap.Load(consumer.makeKey())
+	if !ok {
+		consumer.consumerMap.Store(consumer.makeKey(), consumer)
+	}
+}
+
+func (consumer *consumer) remove() {
+	consumer.consumerMap.Delete(consumer.makeKey())
+}
+func (consumer *consumer) listen() error {
+	log.Info(consumer.ctx, "consumer.listen")
 	write(consumer.conn, []byte("ok"))
 
-	_, ok := controller.consumerMap.Load(consumer.makeKey())
-	if !ok {
-		controller.consumerMap.Store(consumer.makeKey(), consumer)
-	}
+	consumer.store()
 
-	tail, err := controller.file.TailFile()
+	tail, err := consumer.file.TailFile()
 	if err != nil {
 		return err
 	}
@@ -233,7 +246,7 @@ func (consumer *consumerInfo) listen(ctx context.Context, controller *Controller
 	for {
 		line := <-tail
 		l := []byte(fmt.Sprintf("%s", line.Text))
-		log.Info(ctx, fmt.Sprintf("consumer.listen.readLine: [%s]", l))
+		log.Info(consumer.ctx, fmt.Sprintf("consumer.listen.readLine: [%s]", l))
 		if err != nil {
 			return err
 		}
@@ -248,10 +261,10 @@ func (consumer *consumerInfo) listen(ctx context.Context, controller *Controller
 		if string(consumerRes) != "ok" {
 			return fmt.Errorf("error NOK")
 		}
-		log.Info(ctx, fmt.Sprintf("consumer.listen.readLine.complete: [%s]", l))
+		log.Info(consumer.ctx, fmt.Sprintf("consumer.listen.readLine.complete: [%s]", l))
 	}
 }
 
-func (c consumerInfo) makeKey() string {
+func (c consumer) makeKey() string {
 	return fmt.Sprintf("%s_%s", c.ID, c.Ch)
 }

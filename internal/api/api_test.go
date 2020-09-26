@@ -134,7 +134,7 @@ func TestReadingFromBegining(t *testing.T) {
 				break
 			}
 			i++
-			time.Sleep(200 * time.Millisecond)
+			//time.Sleep(200 * time.Millisecond)
 		}
 	}()
 	//go func() {
@@ -156,11 +156,11 @@ func TestReadingFromBegining(t *testing.T) {
 	k := 0
 	for {
 		k++
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 		go func(n int) {
 			cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Host: "localhost:9998", ID: fmt.Sprintf("idd_%d", n), Ch: "ch1", Topic: "topic-1"})
 			cli.Handle(func(req gozeusmq.ZeusRequest) error {
-				if rand.Intn(100) > 98 {
+				if rand.Intn(100) > 99 {
 					return fmt.Errorf("error")
 				}
 				return nil
