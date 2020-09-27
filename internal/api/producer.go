@@ -16,6 +16,11 @@ type producer struct {
 	*Controller
 }
 
+func NewProducer(ctx context.Context, lineSpl []string, conn net.Conn, c *Controller) producer {
+	withCancel, cancel := context.WithCancel(ctx)
+	return producer{conn: conn, Controller: c, ctx: withCancel, cancel: cancel, hasFinish: make(chan bool)}
+}
+
 func (producer producer) Stop() {
 	producer.cancel()
 	<-producer.hasFinish
@@ -62,4 +67,9 @@ func (producer *producer) store() {
 	producer.sLocker.Lock()
 	producer.producerMap.Store(uuid.New().String(), producer)
 	producer.sLocker.Unlock()
+}
+
+func (producer producer) afterStop(err error) {
+	producer.pLocker.Unlock()
+	log.Warn(producer.ctx, "producer.Listen.err", err)
 }

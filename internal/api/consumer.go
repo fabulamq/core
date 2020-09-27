@@ -25,6 +25,27 @@ type consumer struct {
 	*Controller
 }
 
+func NewConsumer(ctx context.Context, lineSpl []string, conn net.Conn, c *Controller) *consumer {
+	ctxWithId := context.WithValue(ctx, "id", lineSpl[1])
+	ctxWithCh := context.WithValue(ctxWithId, "ch", lineSpl[2])
+	withCancel, cancel := context.WithCancel(ctxWithCh)
+
+	k := uint64(0)
+	return &consumer{
+		ID:         lineSpl[1],
+		Ch:         lineSpl[2],
+		Topic:      lineSpl[3],
+		Strategy:   lineSpl[4],
+		cLock:      &sync.Mutex{},
+		hasFinish:  make(chan bool),
+		offset:     &k,
+		conn:       conn,
+		ctx:        withCancel,
+		cancel:     cancel,
+		Controller: c,
+	}
+}
+
 func (c *consumer) store() {
 	c.sLocker.Lock()
 
@@ -62,6 +83,13 @@ func (c *consumer) remove() {
 	if idMap, ok := c.consumerMap.Load(c.onlyIdKey()); ok {
 		delete(idMap.(map[string]*consumer), c.Ch)
 	}
+}
+
+func (c *consumer) afterStop(err error) {
+	c.remove()
+	c.cLock.Unlock()
+	c.hasFinish <- true
+	log.Warn(c.ctx, "producer.Listen.error", err)
 }
 
 func (c *consumer) Stop() {

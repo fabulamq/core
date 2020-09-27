@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"github.com/zeusmq/internal/infra/log"
 	"io"
 	"net"
 	"strconv"
@@ -63,36 +62,15 @@ func (controller *Controller) start(conn net.Conn) {
 		}
 		lineSpl := strings.Split(string(res.b), ";")
 
-		ctxWithId := context.WithValue(context.Background(), "id", lineSpl[1])
-		ctx = context.WithValue(ctxWithId, "ch", lineSpl[2])
-		withCancel, cancel := context.WithCancel(ctx)
 		switch lineSpl[0] {
 		case "c":
-			k := uint64(0)
-			consumerInfo := &consumer{
-				ID:         lineSpl[1],
-				Ch:         lineSpl[2],
-				Topic:      lineSpl[3],
-				Strategy:   lineSpl[4],
-				cLock:      &sync.Mutex{},
-				hasFinish:  make(chan bool),
-				offset:     &k,
-				conn:       conn,
-				ctx:        withCancel,
-				cancel:     cancel,
-				Controller: controller,
-			}
-			err := consumerInfo.Listen()
-			consumerInfo.remove()
-			consumerInfo.cLock.Unlock()
-			consumerInfo.hasFinish <- true
-			log.Warn(ctx, "producer.Listen.error", err)
+			consumer := NewConsumer(ctx, lineSpl, conn, controller)
+			err := consumer.Listen()
+			consumer.afterStop(err)
 		case "p":
-			producer := producer{conn: conn, Controller: controller, ctx: ctx, cancel: cancel, hasFinish: make(chan bool)}
+			producer := NewProducer(ctx, lineSpl, conn, controller)
 			err := producer.listen()
-
-			controller.pLocker.Unlock()
-			log.Warn(ctx, "producer.Listen.err", err)
+			producer.afterStop(err)
 		case "r":
 		}
 		conn.Close()
