@@ -174,11 +174,13 @@ func TestReadingFromBegining(t *testing.T) {
 }
 
 func TestDifferentChannelConsumers(t *testing.T) {
-	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	go func() {
+		p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
 
-	for i := 1; i <= 20000; i++ {
-		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
-	}
+		for i := 1; i <= 20000; i++ {
+			p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+		}
+	}()
 	totalMsgConsumed := make(chan string)
 	lastMsg := make(chan bool)
 

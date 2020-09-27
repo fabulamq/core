@@ -64,9 +64,9 @@ func (producer producer) listen() error {
 }
 
 func (producer *producer) store() {
-	producer.sLocker.Lock()
+	producer.pLocker.Lock()
 	producer.producerMap.Store(uuid.New().String(), producer)
-	producer.sLocker.Unlock()
+	producer.pLocker.Unlock()
 }
 
 func (producer producer) afterStop(err error) {

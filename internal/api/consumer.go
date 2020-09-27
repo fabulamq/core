@@ -36,7 +36,6 @@ func NewConsumer(ctx context.Context, lineSpl []string, conn net.Conn, c *Contro
 		Ch:         lineSpl[2],
 		Topic:      lineSpl[3],
 		Strategy:   lineSpl[4],
-		cLock:      &sync.Mutex{},
 		hasFinish:  make(chan bool),
 		offset:     &k,
 		conn:       conn,
