@@ -9,14 +9,19 @@ import (
 )
 
 type producer struct {
-	conn   net.Conn
-	ctx    context.Context
-	cancel func()
+	conn      net.Conn
+	ctx       context.Context
+	cancel    func()
+	hasFinish chan bool
 	*Controller
 }
 
+func (producer producer) Stop() {
+	producer.cancel()
+	<-producer.hasFinish
+}
 func (producer producer) listen() error {
-	log.Info(producer.ctx, "producer.listen")
+	log.Info(producer.ctx, "producer.Listen")
 	write(producer.conn, []byte("ok"))
 	for {
 		select {
@@ -48,13 +53,13 @@ func (producer producer) listen() error {
 				return err
 			}
 			producer.pLocker.Unlock()
-			log.Info(producer.ctx, fmt.Sprintf("producer.listen.SendedOK: [%s]", producerMsg))
+			log.Info(producer.ctx, fmt.Sprintf("producer.Listen.SendedOK: [%s]", producerMsg))
 		}
 	}
 }
 
-func (p *producer) store() {
-	p.sLocker.Lock()
-	p.producerMap.Store(uuid.New().String(), p)
-	p.sLocker.Unlock()
+func (producer *producer) store() {
+	producer.sLocker.Lock()
+	producer.producerMap.Store(uuid.New().String(), producer)
+	producer.sLocker.Unlock()
 }

@@ -75,40 +75,43 @@ func (controller *Controller) start(conn net.Conn) {
 				Topic:      lineSpl[3],
 				Strategy:   lineSpl[4],
 				cLock:      &sync.Mutex{},
+				hasFinish:  make(chan bool),
 				offset:     &k,
 				conn:       conn,
 				ctx:        withCancel,
 				cancel:     cancel,
 				Controller: controller,
 			}
-			err := consumerInfo.listen()
+			err := consumerInfo.Listen()
 			consumerInfo.remove()
 			consumerInfo.cLock.Unlock()
-			log.Warn(ctx, "producer.listen.error", err)
+			consumerInfo.hasFinish <- true
+			log.Warn(ctx, "producer.Listen.error", err)
 		case "p":
-			producer := producer{conn: conn, Controller: controller, ctx: ctx, cancel: cancel}
+			producer := producer{conn: conn, Controller: controller, ctx: ctx, cancel: cancel, hasFinish: make(chan bool)}
 			err := producer.listen()
+
 			controller.pLocker.Unlock()
-			log.Warn(ctx, "producer.listen.err", err)
+			log.Warn(ctx, "producer.Listen.err", err)
 		case "r":
 		}
 		conn.Close()
 	}()
 }
 
-func (controller *Controller) reset() {
+func (controller *Controller) Reset() {
 	controller.consumerMap.Range(func(key, value interface{}) bool {
 		if key.(string)[0:1] == "c" {
 			cons := value.(*consumer)
-			cons.cancel()
+			cons.Stop()
 		}
 		controller.consumerMap.Delete(key)
 		return true
 	})
 	controller.producerMap.Range(func(key, value interface{}) bool {
 		prod := value.(*producer)
-		prod.cancel()
 		controller.producerMap.Delete(key)
+		prod.Stop()
 		return true
 	})
 }

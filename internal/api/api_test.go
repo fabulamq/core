@@ -21,7 +21,7 @@ func setup() {
 	c, status = Start()
 	c.file.CleanFile()
 	<-status
-	c.reset()
+	c.Reset()
 }
 
 var consumerOffset sync.Map
@@ -176,7 +176,7 @@ func TestReadingFromBegining(t *testing.T) {
 func TestDifferentChannelConsumers(t *testing.T) {
 	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
 
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= 20000; i++ {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 	}
 	totalMsgConsumed := make(chan string)
@@ -186,7 +186,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch1", Topic: "topic-1"})
 		cli1.Handle(func(req gozeusmq.ZeusRequest) error {
 			totalMsgConsumed <- "ch_1"
-			if req.Message == "msg_12" {
+			if req.Message == "msg_20000" {
 				lastMsg <- true
 			}
 			return nil
@@ -196,7 +196,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch2", Topic: "topic-1"})
 		cli2.Handle(func(req gozeusmq.ZeusRequest) error {
 			totalMsgConsumed <- "ch_2"
-			if req.Message == "msg_12" {
+			if req.Message == "msg_20000" {
 				lastMsg <- true
 			}
 			return nil
@@ -207,7 +207,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{Strategy: gozeusmq.FromStart, Host: "localhost:9998", ID: "id_1", Ch: "ch3", Topic: "topic-1"})
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			totalMsgConsumed <- "ch_3"
-			if req.Message == "msg_12" {
+			if req.Message == "msg_20000" {
 				lastMsg <- true
 			}
 			return nil
@@ -226,10 +226,11 @@ L:
 			totalMsg++
 		}
 	}
-	assert.Equal(t, 12, totalMsg)
+	assert.Equal(t, 20000, totalMsg)
 	c.file.CleanFile()
+	c.Reset()
+	fmt.Println(totalMap)
 
-	c.reset()
 }
 
 func TestStrategyCustomOffset(t *testing.T) {

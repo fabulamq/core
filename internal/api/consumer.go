@@ -9,13 +9,14 @@ import (
 )
 
 type consumer struct {
-	ID       string
-	Ch       string
-	Topic    string
-	ctx      context.Context
-	cancel   func()
-	Strategy string
-	conn     net.Conn
+	ID        string
+	Ch        string
+	Topic     string
+	ctx       context.Context
+	hasFinish chan bool
+	cancel    func()
+	Strategy  string
+	conn      net.Conn
 
 	// to lock message for one single consumer
 	cLock  *sync.Mutex
@@ -62,8 +63,14 @@ func (c *consumer) remove() {
 		delete(idMap.(map[string]*consumer), c.Ch)
 	}
 }
-func (c *consumer) listen() error {
-	log.Info(c.ctx, "consumer.listen")
+
+func (c *consumer) Stop() {
+	c.cancel()
+	<-c.hasFinish
+}
+
+func (c *consumer) Listen() error {
+	log.Info(c.ctx, "consumer.Listen")
 	write(c.conn, []byte("ok"))
 
 	c.store()
@@ -80,7 +87,7 @@ func (c *consumer) listen() error {
 			return fmt.Errorf("done ctx")
 		case line := <-tail:
 			msg := []byte(fmt.Sprintf("%s", line.Text))
-			log.Info(c.ctx, fmt.Sprintf("consumer.listen.readLine: [%s]", msg))
+			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.readLine: [%s]", msg))
 			if err != nil {
 				return err
 			}
@@ -89,7 +96,7 @@ func (c *consumer) listen() error {
 			// check if can be consumed
 			msgOffset := getMsgOffset(msg)
 			if *c.offset+1 != msgOffset {
-				log.Info(c.ctx, fmt.Sprintf("consumer.listen.skip: [%s], current offset: %d", msg, *c.offset))
+				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.skip: [%s], current offset: %d", msg, *c.offset))
 				c.cLock.Unlock()
 				continue
 			}
@@ -110,7 +117,7 @@ func (c *consumer) listen() error {
 			*c.offset = getMsgOffset(msg)
 			c.cLock.Unlock()
 
-			log.Info(c.ctx, fmt.Sprintf("consumer.listen.completed: [%s]", msg))
+			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: [%s]", msg))
 		}
 	}
 }
