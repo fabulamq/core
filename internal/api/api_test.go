@@ -21,6 +21,7 @@ func setup() {
 	c, status = Start()
 	c.file.CleanFile()
 	<-status
+	c.reset()
 }
 
 var consumerOffset sync.Map
@@ -227,6 +228,7 @@ L:
 	}
 	assert.Equal(t, 12, totalMsg)
 	c.file.CleanFile()
+
 	c.reset()
 }
 

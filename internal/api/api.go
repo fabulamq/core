@@ -3,12 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"io"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,17 +49,19 @@ type Controller struct {
 	sLocker sync.Mutex
 
 	consumerMap sync.Map
+	producerMap sync.Map
 }
 
 func (controller *Controller) start(conn net.Conn) {
 	go func() {
 		ctx := context.Background()
 
-		line, err := readLine(conn)
-		if err != nil {
+		chRes := readLine(conn)
+		res := <-chRes
+		if res.err != nil {
 			return
 		}
-		lineSpl := strings.Split(string(line), ";")
+		lineSpl := strings.Split(string(res.b), ";")
 
 		ctxWithId := context.WithValue(context.Background(), "id", lineSpl[1])
 		ctx = context.WithValue(ctxWithId, "ch", lineSpl[2])
@@ -82,13 +81,13 @@ func (controller *Controller) start(conn net.Conn) {
 				cancel:     cancel,
 				Controller: controller,
 			}
-			err = consumerInfo.listen()
+			err := consumerInfo.listen()
 			consumerInfo.remove()
 			consumerInfo.cLock.Unlock()
 			log.Warn(ctx, "producer.listen.error", err)
 		case "p":
-			producer := producer{conn: conn, Controller: controller, ctx: ctx}
-			err = producer.listen()
+			producer := producer{conn: conn, Controller: controller, ctx: ctx, cancel: cancel}
+			err := producer.listen()
 			controller.pLocker.Unlock()
 			log.Warn(ctx, "producer.listen.err", err)
 		case "r":
@@ -103,239 +102,53 @@ func (controller *Controller) reset() {
 			cons := value.(*consumer)
 			cons.cancel()
 		}
+		controller.consumerMap.Delete(key)
+		return true
+	})
+	controller.producerMap.Range(func(key, value interface{}) bool {
+		prod := value.(*producer)
+		prod.cancel()
+		controller.producerMap.Delete(key)
 		return true
 	})
 }
 
-type producer struct {
-	conn net.Conn
-	ctx  context.Context
-	*Controller
+type readResult struct {
+	b   []byte
+	err error
 }
 
-func (producer producer) listen() error {
-	log.Info(producer.ctx, "producer.listen")
-	write(producer.conn, []byte("ok"))
-	for {
-		producerMsg, err := readLine(producer.conn)
-		producer.pLocker.Lock()
-		if err != nil {
-			return err
-		}
-		if len(producerMsg) == 0 {
-			return fmt.Errorf("nil message")
-		}
+func readLine(conn io.Reader) chan readResult {
+	chRes := make(chan readResult)
 
-		producerMsg = append([]byte(fmt.Sprintf("%d;", producer.file.GetOffset())), producerMsg...)
-		log.Info(producer.ctx, fmt.Sprintf("producer.send: [%s]", producerMsg))
-
-		// perform save here "topic:msg"
-		err = producer.file.WriteFile(producer.ctx, producerMsg)
-		if err != nil {
-			return err
-		}
-
-		producer.file.AddOffset()
-
-		err = write(producer.conn, []byte("ok"))
-		if err != nil {
-			return err
-		}
-		producer.pLocker.Unlock()
-		log.Info(producer.ctx, fmt.Sprintf("producer.listen.SendedOK: [%s]", producerMsg))
-	}
-}
-
-func readLine(conn io.Reader) ([]byte, error) {
-	buf := make([]byte, 0, 128) // big buffer
-	tmp := make([]byte, 1024)   // using small tmo buffer for demonstrating
-	for {
-		n, err := conn.Read(tmp)
-		if err != nil {
-			if err != io.EOF {
-				return nil, err
+	go func() {
+		buf := make([]byte, 0, 128) // big buffer
+		tmp := make([]byte, 1024)   // using small tmo buffer for demonstrating
+		for {
+			n, err := conn.Read(tmp)
+			if err != nil {
+				if err != io.EOF {
+					chRes <- readResult{b: nil, err: err}
+				}
+				break
 			}
-			break
+			idx := bytes.Index(tmp, []byte("\n"))
+			if idx == -1 {
+				buf = append(buf, tmp[:n]...)
+			} else {
+				buf = append(buf, tmp[:idx]...)
+				break
+			}
 		}
-		idx := bytes.Index(tmp, []byte("\n"))
-		if idx == -1 {
-			buf = append(buf, tmp[:n]...)
-		} else {
-			buf = append(buf, tmp[:idx]...)
-			break
-		}
-	}
-	return buf, nil
+		chRes <- readResult{b: buf, err: nil}
+	}()
+
+	return chRes
 }
 
 func write(writer io.Writer, msg []byte) error {
 	_, err := writer.Write(append(msg, []byte("\n")...))
 	return err
-}
-
-type file struct {
-	file   *os.File
-	m      sync.Mutex
-	offset uint64
-	once   sync.Once
-}
-
-func (f *file) createFile() {
-	if _, err := os.Stat("/var/tmp/queue.txt"); os.IsNotExist(err) {
-		var err error
-		f.file, err = os.Create("/var/tmp/queue.txt")
-		if err != nil {
-			log.Fatal(context.Background(), err.Error())
-		}
-	}
-}
-
-func (f *file) AddOffset() {
-	f.offset++
-}
-
-func (f *file) GetOffset() uint64 {
-	f.once.Do(func() {
-		f.file.Seek(0, 2)
-	})
-	return f.offset
-}
-
-func (f file) TailFile() (chan *tail.Line, error) {
-	t, err := tail.TailFile("/var/tmp/queue.txt", tail.Config{Follow: true})
-	if err != nil {
-		return nil, err
-	}
-	return t.Lines, nil
-}
-
-func (f file) OpenFile() (*os.File, error) {
-	file, err := os.Open("/var/tmp/queue.txt")
-	if err != nil {
-		return nil, err
-	}
-	return file, nil
-}
-
-func (f *file) WriteFile(ctx context.Context, b []byte) error {
-	f.createFile()
-	_, err := f.file.Write(append(b, []byte("\n")...))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (f *file) CleanFile() {
-	f.offset = 1
-	os.Remove("/var/tmp/queue.txt")
-	f.createFile()
-}
-
-type consumer struct {
-	ID       string
-	Ch       string
-	Topic    string
-	ctx      context.Context
-	cancel   func()
-	Strategy string
-	conn     net.Conn
-
-	// to lock message for one single consumer
-	cLock  *sync.Mutex
-	offset *uint64
-
-	*Controller
-}
-
-func (c *consumer) store() {
-	c.sLocker.Lock()
-
-	// get parameters
-	{
-		if idMap, ok := c.consumerMap.Load(c.onlyIdKey()); ok {
-			for _, consumer := range idMap.(map[string]*consumer) {
-				c.cLock = consumer.cLock
-				c.offset = consumer.offset
-			}
-		}
-	}
-
-	// store composed
-	{
-		_, ok := c.consumerMap.Load(c.idChKey())
-		if !ok {
-			c.consumerMap.Store(c.idChKey(), c)
-		}
-	}
-	// store single
-	{
-		idMap, ok := c.consumerMap.Load(c.onlyIdKey())
-		if ok {
-			idMap.(map[string]*consumer)[c.Ch] = c
-		} else {
-			c.consumerMap.Store(c.onlyIdKey(), map[string]*consumer{c.Ch: c})
-		}
-	}
-	c.sLocker.Unlock()
-}
-
-func (c *consumer) remove() {
-	c.consumerMap.Delete(c.idChKey())
-	if idMap, ok := c.consumerMap.Load(c.onlyIdKey()); ok {
-		delete(idMap.(map[string]*consumer), c.Ch)
-	}
-}
-func (c *consumer) listen() error {
-	log.Info(c.ctx, "consumer.listen")
-	write(c.conn, []byte("ok"))
-
-	c.store()
-
-	tail, err := c.file.TailFile()
-	if err != nil {
-		return err
-	}
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			c.cLock.Lock()
-			return fmt.Errorf("done ctx")
-		case line := <-tail:
-			msg := []byte(fmt.Sprintf("%s", line.Text))
-			log.Info(c.ctx, fmt.Sprintf("consumer.listen.readLine: [%s]", msg))
-			if err != nil {
-				return err
-			}
-			c.cLock.Lock()
-
-			// check if can be consumed
-			msgOffset := getMsgOffset(msg)
-			if *c.offset+1 != msgOffset {
-				log.Info(c.ctx, fmt.Sprintf("consumer.listen.skip: [%s], current offset: %d", msg, *c.offset))
-				c.cLock.Unlock()
-				continue
-			}
-
-			err = write(c.conn, msg)
-			if err != nil {
-				return err
-			}
-			consumerRes, err := readLine(c.conn)
-			if err != nil {
-				return err
-			}
-			if string(consumerRes) != "ok" {
-				return fmt.Errorf("error NOK")
-			}
-			// update offset
-			*c.offset = getMsgOffset(msg)
-			c.cLock.Unlock()
-
-			log.Info(c.ctx, fmt.Sprintf("consumer.listen.readLine.complete: [%s]", msg))
-		}
-	}
 }
 
 //func (c *consumer) canConsume() bool {
@@ -346,12 +159,4 @@ func getMsgOffset(msg []byte) uint64 {
 	bInt := msg[0:bytes.IndexByte(msg, ';')]
 	r, _ := strconv.ParseUint(string(bInt), 10, 64)
 	return r
-}
-
-func (c consumer) onlyIdKey() string {
-	return fmt.Sprintf("s_%s", c.ID)
-}
-
-func (c consumer) idChKey() string {
-	return fmt.Sprintf("c_%s_%s", c.ID, c.Ch)
 }
