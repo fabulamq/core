@@ -58,7 +58,7 @@ func loggerInit() *logrus.Logger {
 	once.Do(func() {
 		logger = &logrus.Logger{
 			Out:   os.Stderr,
-			Level: logrus.DebugLevel,
+			Level: logrus.InfoLevel,
 			Formatter: &prefixed.TextFormatter{
 				DisableColors:   false,
 				TimestampFormat: "2006-01-02 15:04:05",
@@ -73,11 +73,6 @@ func loggerInit() *logrus.Logger {
 
 func output(ctx context.Context, fieldsArr []Fields, err error) *logrus.Entry {
 	f := defaultFields(ctx, make(Common, 0))
-
-	ch := inject(ctx, "ch")
-	if ch != "" {
-		f["ch"] = ch
-	}
 
 	id := inject(ctx, "id")
 	if id != "" {
