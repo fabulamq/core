@@ -5,7 +5,9 @@ import (
 	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"os"
+	"runtime"
 	"sync"
+	"sync/atomic"
 )
 
 type file struct {
@@ -26,18 +28,22 @@ func (f *file) createFile() {
 }
 
 func (f *file) AddOffset() {
-	f.offset++
+	atomic.AddUint64(&f.offset, 1)
+	runtime.Gosched()
 }
 
 func (f *file) GetOffset() uint64 {
 	f.once.Do(func() {
 		f.file.Seek(0, 2)
 	})
-	return f.offset
+	return atomic.LoadUint64(&f.offset)
 }
 
-func (f file) TailFile() (chan *tail.Line, error) {
-	t, err := tail.TailFile("/var/tmp/queue.txt", tail.Config{Follow: true})
+func (f file) TailFile(s *tail.SeekInfo) (chan *tail.Line, error) {
+	t, err := tail.TailFile("/var/tmp/queue.txt", tail.Config{
+		Follow: true,
+		Location: s,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +58,7 @@ func (f file) OpenFile() (*os.File, error) {
 	return file, nil
 }
 
-func (f *file) WriteFile(ctx context.Context, b []byte) error {
+func (f *file) WriteFile(b []byte) error {
 	f.createFile()
 	_, err := f.file.Write(append(b, []byte("\n")...))
 	if err != nil {

@@ -42,18 +42,20 @@ func (producer producer) listen() error {
 				return fmt.Errorf("nil message")
 			}
 
-			producerMsg = append([]byte(fmt.Sprintf("%d;", producer.file.GetOffset())), producerMsg...)
+			msgOffset := producer.file.GetOffset()
+
+			producerMsg = append([]byte(fmt.Sprintf("%d;", msgOffset)), producerMsg...)
 			log.Info(producer.ctx, fmt.Sprintf("producer.send: [%s]", producerMsg))
 
 			// perform save here "topic:msg"
-			err := producer.file.WriteFile(producer.ctx, producerMsg)
+			err := producer.file.WriteFile(producerMsg)
 			if err != nil {
 				return err
 			}
 
 			producer.file.AddOffset()
 
-			err = write(producer.conn, []byte("ok"))
+			err = write(producer.conn, []byte(fmt.Sprintf("ok;%d", msgOffset)))
 			if err != nil {
 				return err
 			}

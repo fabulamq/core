@@ -3,10 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"net"
-	"sync"
-	"time"
+	"strconv"
 )
 
 type consumer struct {
@@ -15,11 +15,7 @@ type consumer struct {
 	ctx         context.Context
 	hasFinish   chan bool
 	cancel      func()
-	Strategy    string
-	connections sync.Map
-	locker      sync.Mutex
-	// to lock message for one single consumer
-	offset *uint64
+	Offset      int64
 
 	controller *Controller
 }
@@ -31,23 +27,19 @@ type connection struct {
 }
 
 func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer {
+	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
+	withCancel, cancel := context.WithCancel(ctxWirtId)
 
-	ctxWithId := context.WithValue(ctx, "id", lineSpl[1])
-	withCancel, cancel := context.WithCancel(ctxWithId)
-
-	k := uint64(0)
+	offset, _ := strconv.ParseInt(lineSpl[3], 10, 64)
 	newConsumer := &consumer{
 		ID:         lineSpl[1],
-		Topic:      lineSpl[3],
-		Strategy:   lineSpl[4],
+		Topic:      lineSpl[2],
+		Offset:     offset,
 		hasFinish:  make(chan bool),
-		offset:     &k,
 		ctx:        withCancel,
-		locker:     sync.Mutex{},
 		cancel:     cancel,
 		controller: c,
 	}
-	c.consumerMap.Store(lineSpl[1], newConsumer)
 	return newConsumer
 }
 
@@ -61,10 +53,30 @@ func (c *consumer) Stop() {
 	<-c.hasFinish
 }
 
-func (c *consumer) Listen() error {
+func (c *consumer) strategy() *tail.SeekInfo {
+	if c.Offset == -1 {
+		return &tail.SeekInfo{
+			Offset: 0,
+			Whence: 2,
+		}
+	}
+	return &tail.SeekInfo{
+		Offset: c.Offset,
+		Whence: 0,
+	}
+}
+
+func (c *consumer) Listen(conn net.Conn) error {
 	log.Info(c.ctx, "consumer.Listen")
 
-	tail, err := c.controller.file.TailFile()
+	err := write(conn, []byte("ok"))
+	if err != nil {
+		return err
+	}
+
+	c.controller.pLocker.Lock()
+	tail, err := c.controller.file.TailFile(c.strategy())
+	c.controller.pLocker.Unlock()
 	if err != nil {
 		return err
 	}
@@ -80,69 +92,20 @@ func (c *consumer) Listen() error {
 				return err
 			}
 
-			c.locker.Lock()
-
-			success := false
-			errs := make([]string, 0)
-			successCh := ""
-			errsCh := make([]string, 0)
-			t := 0
-			c.connections.Range(func(key, value interface{}) bool {
-				connMap := value.(*connection)
-
-				t += 1
-				start := time.Now()
-
-				err = write(connMap.conn, msg)
-				if err != nil {
-					errsCh = append(errsCh, key.(string))
-					errs = append(errs, fmt.Sprintf("err on consumer %s [%s]", key, err.Error()))
-					return true
-				}
-				chRes := readLine(connMap.conn)
-				res := <-chRes
-				if res.err != nil {
-					errsCh = append(errsCh, key.(string))
-					errs = append(errs, fmt.Sprintf("err on consumer %s [%s]", key, res.err.Error()))
-					return true
-				}
-				if string(res.b) != "ok" {
-					errsCh = append(errsCh, key.(string))
-					errs = append(errs, fmt.Sprintf("err NOK %s", key))
-					return true
-				}
-				connMap.Avg = (time.Now().Sub(start).Milliseconds() + connMap.Avg) / 2
-				success = true
-				successCh = key.(string)
-				return false
-			})
-
-			fmt.Println("AAA", errsCh)
-
-			if success {
-				*c.offset = getMsgOffset(msg)
-			} else {
-				errMsg := ""
-				for _, err := range errs {
-					errMsg += fmt.Sprintf("[%s]", err)
-				}
-				c.locker.Unlock()
-				return fmt.Errorf("no success on msg [%s]: {%s} - %d", msg, errMsg, t)
+			err = write(conn, msg)
+			if err != nil {
+				return err
 			}
-			c.locker.Unlock()
-			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: Ch:[%s] [%s]", successCh, msg))
+			chRes := readLine(conn)
+			res := <-chRes
+			if res.err != nil {
+				return err
+			}
+			if string(res.b) != "ok" {
+				return fmt.Errorf("NOK")
+			}
+
+			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: [%s]", msg))
 		}
 	}
-}
-
-func (c consumer) onlyIdKey() string {
-	return fmt.Sprintf("s_%s", c.ID)
-}
-
-func (c *consumer) addChannel(ch string, conn net.Conn) {
-	write(conn, []byte("ok"))
-	c.connections.Store(ch, &connection{
-		conn: conn,
-		Ch:   ch,
-	})
 }

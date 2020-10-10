@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/sirupsen/logrus"
 	prefixed "github.com/x-cray/logrus-prefixed-formatter"
-	"github.com/zeusmq/internal/infra/tracer"
 	"os"
 	"sync"
 )
@@ -92,10 +91,6 @@ func output(ctx context.Context, fieldsArr []Fields, err error) *logrus.Entry {
 
 	if err != nil {
 		f["error"] = err.Error()
-		errWithTrace, ok := err.(tracer.ErrorWithTrace)
-		if ok {
-			f["stack_error"] = errWithTrace.Trace()
-		}
 	}
 
 	return loggerInit().WithFields(logrus.Fields(f))

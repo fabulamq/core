@@ -3,7 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"github.com/google/uuid"
 	"github.com/zeusmq/internal/infra/log"
 	"io"
 	"net"
@@ -17,15 +17,14 @@ type apiStatus struct {
 	isReady bool
 }
 
-func Start() (*Controller, chan apiStatus) {
+func Start(c Config) (*Controller, chan apiStatus) {
 	controller := &Controller{
-		consumerMap: sync.Map{},
-		file:        file{offset: 1},
+		file:        file{offset: 1, m: sync.Mutex{}},
 		pLocker:     sync.Mutex{},
 		locker:      sync.Mutex{},
 	}
 	chStatus := make(chan apiStatus)
-	listener, err := net.Listen("tcp", "localhost:9998")
+	listener, err := net.Listen("tcp", c.Host)
 	if err != nil {
 		chStatus <- apiStatus{err: err, isReady: false}
 	}
@@ -45,14 +44,17 @@ func Start() (*Controller, chan apiStatus) {
 	return controller, chStatus
 }
 
+type Config struct {
+	Host             string
+	OffsetPerChapter int
+}
+
 type Controller struct {
 	file    file
 	pLocker sync.Mutex
-	sLocker sync.Mutex
 
 	// general locker
 	locker sync.Mutex
-
 	consumerMap sync.Map
 	producerMap sync.Map
 }
@@ -70,19 +72,12 @@ func (controller *Controller) start(conn net.Conn) {
 
 		switch lineSpl[0] {
 		case "c":
-			controller.locker.Lock()
-			if consumer := controller.getConsumer(lineSpl[1]); consumer != nil {
-				consumer.addChannel(lineSpl[2], conn)
-				controller.locker.Unlock()
-				log.Info(ctx, fmt.Sprintf("start.addConsumer: %s", lineSpl[2]))
-			} else {
-				log.Info(ctx, fmt.Sprintf("start.newConsumer: %s", lineSpl[2]))
-				consumer := NewConsumer(ctx, lineSpl, controller)
-				consumer.addChannel(lineSpl[2], conn)
-				controller.locker.Unlock()
-				err := consumer.Listen()
-				log.Warn(ctx, "listener.error", err)
-			}
+			consumer := NewConsumer(ctx, lineSpl, controller)
+			uid := uuid.New().String()
+			controller.consumerMap.Store(uid, consumer)
+			err := consumer.Listen(conn)
+			controller.consumerMap.Delete(uid)
+			log.Warn(consumer.ctx, "listener.error", err)
 		case "p":
 			producer := NewProducer(ctx, lineSpl, conn, controller)
 			err := producer.listen()
@@ -93,19 +88,10 @@ func (controller *Controller) start(conn net.Conn) {
 	}()
 }
 
-func (controller *Controller) getConsumer(id string) *consumer {
-	if c, ok := controller.consumerMap.Load(id); ok {
-		return c.(*consumer)
-	}
-	return nil
-}
-
 func (controller *Controller) Reset() {
 	controller.consumerMap.Range(func(key, value interface{}) bool {
-		if key.(string)[0:1] == "c" {
-			cons := value.(*consumer)
-			cons.Stop()
-		}
+		consumer := value.(*consumer)
+		consumer.cancel()
 		controller.consumerMap.Delete(key)
 		return true
 	})
