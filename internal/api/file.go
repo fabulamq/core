@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"os"
@@ -12,15 +13,20 @@ import (
 
 type file struct {
 	file   *os.File
+	path   string
 	m      sync.Mutex
 	offset uint64
 	once   sync.Once
 }
 
+func (f *file) getPath() string {
+	return fmt.Sprintf("%s/%s", f.path, "queue.txt")
+}
+
 func (f *file) createFile() {
-	if _, err := os.Stat("/var/tmp/queue.txt"); os.IsNotExist(err) {
+	if _, err := os.Stat(f.getPath()); os.IsNotExist(err) {
 		var err error
-		f.file, err = os.Create("/var/tmp/queue.txt")
+		f.file, err = os.Create(f.getPath())
 		if err != nil {
 			log.Fatal(context.Background(), err.Error())
 		}
@@ -40,8 +46,8 @@ func (f *file) GetOffset() uint64 {
 }
 
 func (f file) TailFile(s *tail.SeekInfo) (chan *tail.Line, error) {
-	t, err := tail.TailFile("/var/tmp/queue.txt", tail.Config{
-		Follow: true,
+	t, err := tail.TailFile(f.getPath(), tail.Config{
+		Follow:   true,
 		Location: s,
 	})
 	if err != nil {
@@ -51,7 +57,7 @@ func (f file) TailFile(s *tail.SeekInfo) (chan *tail.Line, error) {
 }
 
 func (f file) OpenFile() (*os.File, error) {
-	file, err := os.Open("/var/tmp/queue.txt")
+	file, err := os.Open(f.getPath())
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +75,6 @@ func (f *file) WriteFile(b []byte) error {
 
 func (f *file) CleanFile() {
 	f.offset = 1
-	os.Remove("/var/tmp/queue.txt")
+	os.Remove(f.getPath())
 	f.createFile()
 }

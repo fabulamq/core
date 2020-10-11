@@ -10,12 +10,11 @@ import (
 )
 
 type consumer struct {
-	ID          string
-	Topic       string
-	ctx         context.Context
-	hasFinish   chan bool
-	cancel      func()
-	Offset      int64
+	ID        string
+	ctx       context.Context
+	hasFinish chan bool
+	cancel    func()
+	Offset    int64
 
 	controller *Controller
 }
@@ -30,10 +29,9 @@ func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
-	offset, _ := strconv.ParseInt(lineSpl[3], 10, 64)
+	offset, _ := strconv.ParseInt(lineSpl[2], 10, 64)
 	newConsumer := &consumer{
 		ID:         lineSpl[1],
-		Topic:      lineSpl[2],
 		Offset:     offset,
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,

@@ -1,0 +1,1 @@
+- health check on consumers every time a producer send a message

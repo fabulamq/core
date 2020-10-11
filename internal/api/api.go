@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"github.com/google/uuid"
 	"github.com/zeusmq/internal/infra/log"
 	"io"
 	"net"
@@ -19,9 +18,13 @@ type apiStatus struct {
 
 func Start(c Config) (*Controller, chan apiStatus) {
 	controller := &Controller{
-		file:        file{offset: 1, m: sync.Mutex{}},
-		pLocker:     sync.Mutex{},
-		locker:      sync.Mutex{},
+		file: file{
+			offset: 1,
+			m:      sync.Mutex{},
+			path:   c.Folder,
+		},
+		pLocker: sync.Mutex{},
+		locker:  sync.Mutex{},
 	}
 	chStatus := make(chan apiStatus)
 	listener, err := net.Listen("tcp", c.Host)
@@ -46,6 +49,7 @@ func Start(c Config) (*Controller, chan apiStatus) {
 
 type Config struct {
 	Host             string
+	Folder           string
 	OffsetPerChapter int
 }
 
@@ -54,7 +58,7 @@ type Controller struct {
 	pLocker sync.Mutex
 
 	// general locker
-	locker sync.Mutex
+	locker      sync.Mutex
 	consumerMap sync.Map
 	producerMap sync.Map
 }
@@ -73,10 +77,9 @@ func (controller *Controller) start(conn net.Conn) {
 		switch lineSpl[0] {
 		case "c":
 			consumer := NewConsumer(ctx, lineSpl, controller)
-			uid := uuid.New().String()
-			controller.consumerMap.Store(uid, consumer)
+			controller.consumerMap.Store(consumer.ID, consumer)
 			err := consumer.Listen(conn)
-			controller.consumerMap.Delete(uid)
+			controller.consumerMap.Delete(consumer.ID)
 			log.Warn(consumer.ctx, "listener.error", err)
 		case "p":
 			producer := NewProducer(ctx, lineSpl, conn, controller)
@@ -140,10 +143,6 @@ func write(writer io.Writer, msg []byte) error {
 	_, err := writer.Write(append(msg, []byte("\n")...))
 	return err
 }
-
-//func (c *consumer) canConsume() bool {
-//
-//}
 
 func getMsgOffset(msg []byte) uint64 {
 	bInt := msg[0:bytes.IndexByte(msg, ';')]
