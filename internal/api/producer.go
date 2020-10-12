@@ -38,24 +38,18 @@ func (producer producer) listen() error {
 				return res.err
 			}
 			producer.pLocker.Lock()
+
 			if len(producerMsg) == 0 {
 				return fmt.Errorf("nil message")
 			}
 
-			msgOffset := producer.file.GetOffset()
-
-			producerMsg = append([]byte(fmt.Sprintf("%d;", msgOffset)), producerMsg...)
-			log.Info(producer.ctx, fmt.Sprintf("producer.send: [%s]", producerMsg))
-
 			// perform save here "topic:msg"
-			err := producer.file.WriteFile(producerMsg)
+			chLine, err := producer.book.Write(producerMsg)
 			if err != nil {
 				return err
 			}
 
-			producer.file.AddOffset()
-
-			err = write(producer.conn, []byte(fmt.Sprintf("ok;%d", msgOffset)))
+			err = write(producer.conn, []byte(fmt.Sprintf("ok;%s", chLine)))
 			if err != nil {
 				return err
 			}

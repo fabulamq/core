@@ -18,12 +18,13 @@ var c *Controller
 var status chan apiStatus
 
 func setup() {
+	os.RemoveAll("/home/kanczuk/go/src/github.com/zeusmq/.data/")
+	os.Mkdir("/home/kanczuk/go/src/github.com/zeusmq/.data", os.ModePerm)
 	c, status = Start(Config{
 		Host:             "localhost:9998",
-		Folder:           "/home/kanczuk/go/src/github.com/zeusmq/.data/",
-		OffsetPerChapter: 1000,
+		Folder:           "/home/kanczuk/go/src/github.com/zeusmq/.data",
+		OffsetPerChapter: 10,
 	})
-	c.file.CleanFile()
 	<-status
 	c.Reset()
 }
@@ -36,23 +37,14 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// fabulaMq
+
 func TestDifferentChannelConsumers(t *testing.T) {
-	mFactor := uint64(10)
-
+	c.book.maxLinesPerChapter = int64(50)
 	{
 		p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
 		go func() {
-			for i := uint64(1); i <= uint64(10)*mFactor; i++ {
-				_, err := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
-				assert.NoError(t, err)
-			}
-		}()
-	}
-
-	{
-		p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
-		go func() {
-			for i := uint64(1); i <= uint64(10)*mFactor; i++ {
+			for i := 1; i <= 200; i++ {
 				_, err := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 				assert.NoError(t, err)
 			}
@@ -63,23 +55,23 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	lastMsg := make(chan bool)
 
 	go func() {
-		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Offset: gozeusmq.OffsetStrategy{}, Host: "localhost:9998"})
+		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
 		cli1.Handle(func(req gozeusmq.ZeusRequest) error {
-			totalMsgConsumed <- "ch_1"
-			if req.Offset == 10*mFactor {
+			if req.Line == 10 && req.Chapter == 3 {
 				return fmt.Errorf("error")
 			}
+			totalMsgConsumed <- "ch_1"
 			return nil
 		})
 		lastMsg <- true
 	}()
 	go func() {
-		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "2", Offset: gozeusmq.OffsetStrategy{}, Host: "localhost:9998"})
+		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "2", Mark: "0_0", Host: "localhost:9998"})
 		cli2.Handle(func(req gozeusmq.ZeusRequest) error {
-			totalMsgConsumed <- "ch_2"
-			if req.Offset == 15*mFactor {
+			if req.Line == 0 && req.Chapter == 1 {
 				return fmt.Errorf("error")
 			}
+			totalMsgConsumed <- "ch_2"
 			return nil
 		})
 		lastMsg <- true
@@ -87,12 +79,12 @@ func TestDifferentChannelConsumers(t *testing.T) {
 
 	go func() {
 		time.Sleep(1 * time.Second)
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Offset: gozeusmq.OffsetStrategy{}, Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: "0_0", Host: "localhost:9998"})
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
-			totalMsgConsumed <- "ch_3"
-			if req.Offset == 18*mFactor {
+			if req.Line == 5 && req.Chapter == 2 {
 				return fmt.Errorf("error")
 			}
+			totalMsgConsumed <- "ch_3"
 			return nil
 		})
 		lastMsg <- true
@@ -114,7 +106,7 @@ L:
 			totalMsg++
 		}
 	}
-	assert.Equal(t, 43*mFactor, totalMsg)
+	assert.Equal(t, 315, int(totalMsg))
 
 }
 
@@ -124,9 +116,9 @@ func TestFromAheadOffset(t *testing.T) {
 	for i := 1; i <= 200; i++ {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 	}
-	cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Offset: gozeusmq.OffsetStrategy{Chapter: 0, Offset: 0}, Host: "localhost:9998"})
+	cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
 	cli1.Handle(func(req gozeusmq.ZeusRequest) error {
-		if req.Offset == 200 {
+		if req.Line == 200 {
 			return fmt.Errorf("error")
 		}
 		return nil
@@ -145,7 +137,7 @@ func TestStrategyCustomOffset(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Offset: gozeusmq.OffsetStrategy{}, Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			lastMsgReceived = req.Message
@@ -177,7 +169,7 @@ func TestSyncProducer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Offset: gozeusmq.OffsetStrategy{}, Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			lastMsgReceived = req.Message

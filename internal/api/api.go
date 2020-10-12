@@ -6,7 +6,6 @@ import (
 	"github.com/zeusmq/internal/infra/log"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 )
@@ -17,16 +16,21 @@ type apiStatus struct {
 }
 
 func Start(c Config) (*Controller, chan apiStatus) {
+	chStatus := make(chan apiStatus)
+
+	book, err := startBook(bookConfig{
+		MaxLinerPerChapter: c.OffsetPerChapter,
+		Folder:             c.Folder,
+	})
+	if err != nil {
+		chStatus <- apiStatus{err: err, isReady: false}
+	}
+
 	controller := &Controller{
-		file: file{
-			offset: 1,
-			m:      sync.Mutex{},
-			path:   c.Folder,
-		},
+		book: book,
 		pLocker: sync.Mutex{},
 		locker:  sync.Mutex{},
 	}
-	chStatus := make(chan apiStatus)
 	listener, err := net.Listen("tcp", c.Host)
 	if err != nil {
 		chStatus <- apiStatus{err: err, isReady: false}
@@ -50,13 +54,12 @@ func Start(c Config) (*Controller, chan apiStatus) {
 type Config struct {
 	Host             string
 	Folder           string
-	OffsetPerChapter int
+	OffsetPerChapter int64
 }
 
 type Controller struct {
-	file    file
 	pLocker sync.Mutex
-
+	book    *book
 	// general locker
 	locker      sync.Mutex
 	consumerMap sync.Map
@@ -142,10 +145,4 @@ func readLine(conn io.Reader) chan readResult {
 func write(writer io.Writer, msg []byte) error {
 	_, err := writer.Write(append(msg, []byte("\n")...))
 	return err
-}
-
-func getMsgOffset(msg []byte) uint64 {
-	bInt := msg[0:bytes.IndexByte(msg, ';')]
-	r, _ := strconv.ParseUint(string(bInt), 10, 64)
-	return r
 }

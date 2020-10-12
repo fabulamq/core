@@ -6,9 +6,7 @@ import (
 	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"os"
-	"runtime"
 	"sync"
-	"sync/atomic"
 )
 
 type file struct {
@@ -16,7 +14,6 @@ type file struct {
 	path   string
 	m      sync.Mutex
 	offset uint64
-	once   sync.Once
 }
 
 func (f *file) getPath() string {
@@ -33,18 +30,6 @@ func (f *file) createFile() {
 	}
 }
 
-func (f *file) AddOffset() {
-	atomic.AddUint64(&f.offset, 1)
-	runtime.Gosched()
-}
-
-func (f *file) GetOffset() uint64 {
-	f.once.Do(func() {
-		f.file.Seek(0, 2)
-	})
-	return atomic.LoadUint64(&f.offset)
-}
-
 func (f file) TailFile(s *tail.SeekInfo) (chan *tail.Line, error) {
 	t, err := tail.TailFile(f.getPath(), tail.Config{
 		Follow:   true,
@@ -54,14 +39,6 @@ func (f file) TailFile(s *tail.SeekInfo) (chan *tail.Line, error) {
 		return nil, err
 	}
 	return t.Lines, nil
-}
-
-func (f file) OpenFile() (*os.File, error) {
-	file, err := os.Open(f.getPath())
-	if err != nil {
-		return nil, err
-	}
-	return file, nil
 }
 
 func (f *file) WriteFile(b []byte) error {

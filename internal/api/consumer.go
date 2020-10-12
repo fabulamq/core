@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/hpcloud/tail"
 	"github.com/zeusmq/internal/infra/log"
 	"net"
 	"strconv"
@@ -14,7 +13,9 @@ type consumer struct {
 	ctx       context.Context
 	hasFinish chan bool
 	cancel    func()
-	Offset    int64
+
+	Line      int64
+	Chapter   int64
 
 	controller *Controller
 }
@@ -29,10 +30,12 @@ func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
-	offset, _ := strconv.ParseInt(lineSpl[2], 10, 64)
+	line, _ := strconv.ParseInt(lineSpl[2], 10, 64)
+	chapter, _ := strconv.ParseInt(lineSpl[3], 10, 64)
 	newConsumer := &consumer{
 		ID:         lineSpl[1],
-		Offset:     offset,
+		Line:       line,
+		Chapter:    chapter,
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
 		cancel:     cancel,
@@ -51,19 +54,6 @@ func (c *consumer) Stop() {
 	<-c.hasFinish
 }
 
-func (c *consumer) strategy() *tail.SeekInfo {
-	if c.Offset == -1 {
-		return &tail.SeekInfo{
-			Offset: 0,
-			Whence: 2,
-		}
-	}
-	return &tail.SeekInfo{
-		Offset: c.Offset,
-		Whence: 0,
-	}
-}
-
 func (c *consumer) Listen(conn net.Conn) error {
 	log.Info(c.ctx, "consumer.Listen")
 
@@ -72,38 +62,50 @@ func (c *consumer) Listen(conn net.Conn) error {
 		return err
 	}
 
-	c.controller.pLocker.Lock()
-	tail, err := c.controller.file.TailFile(c.strategy())
-	c.controller.pLocker.Unlock()
-	if err != nil {
-		return err
-	}
+	currLine := c.Line
+
 
 	for {
-		select {
-		case <-c.ctx.Done():
-			return fmt.Errorf("done ctx")
-		case line := <-tail:
-			msg := []byte(fmt.Sprintf("%s", line.Text))
-			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.readLine: [%s]", msg))
-			if err != nil {
-				return err
-			}
+		tail, err := c.controller.book.Read(c.Chapter)
 
-			err = write(conn, msg)
-			if err != nil {
-				return err
-			}
-			chRes := readLine(conn)
-			res := <-chRes
-			if res.err != nil {
-				return err
-			}
-			if string(res.b) != "ok" {
-				return fmt.Errorf("NOK")
-			}
+		if err != nil {
+			return err
+		}
 
-			log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: [%s]", msg))
+		Chapter: for {
+			select {
+			case <-c.ctx.Done():
+				return fmt.Errorf("done ctx")
+			case line := <-tail:
+				msg := []byte(fmt.Sprintf("%d;%d;%s", c.Chapter, currLine, line.Text))
+				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.readLine: [%s]", msg))
+				if err != nil {
+					return err
+				}
+
+				err = write(conn, msg)
+				if err != nil {
+					return err
+				}
+				chRes := readLine(conn)
+				res := <-chRes
+				if res.err != nil {
+					return err
+				}
+				if string(res.b) != "ok" {
+					return fmt.Errorf("NOK")
+				}
+
+				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: [%s]", msg))
+
+				currLine++
+				if currLine == c.controller.book.maxLinesPerChapter {
+					currLine = 0
+					c.Chapter++
+					break Chapter
+				}
+			}
 		}
 	}
+
 }
