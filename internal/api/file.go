@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/fabulamq/internal/infra/log"
 	"github.com/hpcloud/tail"
-	"github.com/zeusmq/internal/infra/log"
 	"os"
 	"sync"
 )

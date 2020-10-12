@@ -2,7 +2,7 @@ package api
 
 import (
 	"fmt"
-	"github.com/go-zeusmq/pkg/gozeusmq"
+	"github.com/go-fabula/pkg/gofabula"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"sync"
@@ -37,12 +37,10 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// fabulaMq
-
 func TestDifferentChannelConsumers(t *testing.T) {
 	c.book.maxLinesPerChapter = int64(50)
 	{
-		p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+		p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
 		go func() {
 			for i := 0; i < 200; i++ {
 				_, err := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
@@ -55,8 +53,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	lastMsg := make(chan bool)
 
 	go func() { // 160 lines
-		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli1.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli1, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli1.Handle(func(req gofabula.FabulaRequest) error {
 			if req.Line == 10 && req.Chapter == 3 {
 				return fmt.Errorf("error")
 			}
@@ -66,8 +64,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		lastMsg <- true
 	}()
 	go func() { // 50 lines
-		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "2", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli2.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli2, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "2", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli2.Handle(func(req gofabula.FabulaRequest) error {
 			if req.Line == 0 && req.Chapter == 1 {
 				return fmt.Errorf("error")
 			}
@@ -79,8 +77,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 
 	go func() {// wait, 105 lines
 		time.Sleep(1 * time.Second)
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "3", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli.Handle(func(req gofabula.FabulaRequest) error {
 			if req.Line == 5 && req.Chapter == 2 {
 				return fmt.Errorf("error")
 			}
@@ -91,8 +89,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	}()
 
 	go func() { // only read 5 lines
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: gozeusmq.Mark{Chapter:2, Line:5}, Host: "localhost:9998"})
-		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "3", Mark: gofabula.Mark{Chapter:2, Line:5}, Host: "localhost:9998"})
+		cli.Handle(func(req gofabula.FabulaRequest) error {
 			if req.Line == 10 && req.Chapter == 2 {
 				assert.Equal(t, "msg_105", req.Message)
 				return fmt.Errorf("error")
@@ -124,13 +122,13 @@ L:
 }
 
 func TestFromAheadOffset(t *testing.T) {
-	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
 
 	for i := 1; i <= 200; i++ {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 	}
-	cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-	cli1.Handle(func(req gozeusmq.ZeusRequest) error {
+	cli1, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+	cli1.Handle(func(req gofabula.FabulaRequest) error {
 		if req.Line == 200 {
 			return fmt.Errorf("error")
 		}
@@ -139,7 +137,7 @@ func TestFromAheadOffset(t *testing.T) {
 }
 
 func TestStrategyCustomOffset(t *testing.T) {
-	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
 
 	for i := 1; i <= 10; i++ {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
@@ -150,9 +148,9 @@ func TestStrategyCustomOffset(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
-		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli.Handle(func(req gofabula.FabulaRequest) error {
 			lastMsgReceived = req.Message
 			return fmt.Errorf("error")
 		})
@@ -164,15 +162,15 @@ func TestStrategyCustomOffset(t *testing.T) {
 }
 
 func TestSyncProducer(t *testing.T) {
-	p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
+	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
 
 	for i := 1; i <= 10; i++ {
 		msgId, _ := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
-		s, _ := gozeusmq.NewSync(gozeusmq.ConfigS{
+		s, _ := gofabula.NewSync(gofabula.ConfigS{
 			Host:  "localhost:9998",
 			MsgId: msgId,
 		})
-		s.Sync(func(message gozeusmq.SyncMessage) bool {
+		s.Sync(func(message gofabula.SyncMessage) bool {
 			return true
 		})
 	}
@@ -182,9 +180,9 @@ func TestSyncProducer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
-		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+		cli.Handle(func(req gofabula.FabulaRequest) error {
 			lastMsgReceived = req.Message
 			return fmt.Errorf("error")
 		})
