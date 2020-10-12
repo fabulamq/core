@@ -8,7 +8,7 @@ import (
 	"strconv"
 )
 
-type consumer struct {
+type storyReader struct {
 	ID        string
 	ctx       context.Context
 	hasFinish chan bool
@@ -20,19 +20,13 @@ type consumer struct {
 	controller *Controller
 }
 
-type connection struct {
-	conn net.Conn
-	Avg  int64
-	Ch   string
-}
-
-func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer {
+func newStoryReader(ctx context.Context, lineSpl []string, c *Controller) *storyReader {
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
 	chapter, _ := strconv.ParseInt(lineSpl[2], 10, 64)
 	line, _ := strconv.ParseInt(lineSpl[3], 10, 64)
-	newConsumer := &consumer{
+	newConsumer := &storyReader{
 		ID:         lineSpl[1],
 		Line:       line,
 		Chapter:    chapter,
@@ -44,29 +38,29 @@ func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer
 	return newConsumer
 }
 
-func (c *consumer) afterStop(err error) {
-	c.hasFinish <- true
-	log.Warn(c.ctx, "producer.Listen.error", err)
+func (sr *storyReader) afterStop(err error) {
+	sr.hasFinish <- true
+	log.Warn(sr.ctx, "storyTeller.Listen.error", err)
 }
 
-func (c *consumer) Stop() {
-	c.cancel()
-	<-c.hasFinish
+func (sr *storyReader) Stop() {
+	sr.cancel()
+	<-sr.hasFinish
 }
 
-func (c *consumer) Listen(conn net.Conn) error {
-	log.Info(c.ctx, "consumer.Listen")
+func (sr *storyReader) Listen(conn net.Conn) error {
+	log.Info(sr.ctx, "storyReader.Listen")
 
 	err := write(conn, []byte("ok"))
 	if err != nil {
 		return err
 	}
 
-	currLine := c.Line
+	currLine := sr.Line
 
 
 	for {
-		chapter, err := c.controller.book.Read(c.Chapter)
+		chapter, err := sr.controller.book.Read(sr.Chapter)
 
 		if err != nil {
 			return err
@@ -74,11 +68,11 @@ func (c *consumer) Listen(conn net.Conn) error {
 
 		Chapter: for {
 			select {
-			case <-c.ctx.Done():
+			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <- chapter:
-				msg := []byte(fmt.Sprintf("%d;%d;%s", c.Chapter, currLine, line.Text))
-				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.readLine: [%s]", msg))
+				msg := []byte(fmt.Sprintf("%d;%d;%s", sr.Chapter, currLine, line.Text))
+				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine: [%s]", msg))
 				if err != nil {
 					return err
 				}
@@ -96,12 +90,12 @@ func (c *consumer) Listen(conn net.Conn) error {
 					return fmt.Errorf("NOK")
 				}
 
-				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.completed: [%s]", msg))
+				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.completed: [%s]", msg))
 
 				currLine++
-				if currLine == c.controller.book.maxLinesPerChapter {
+				if currLine == sr.controller.book.maxLinesPerChapter {
 					currLine = 0
-					c.Chapter++
+					sr.Chapter++
 					break Chapter
 				}
 			}

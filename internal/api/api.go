@@ -61,9 +61,9 @@ type Controller struct {
 	pLocker sync.Mutex
 	book    *book
 	// general locker
-	locker      sync.Mutex
-	consumerMap sync.Map
-	producerMap sync.Map
+	locker    sync.Mutex
+	readerMap sync.Map
+	writerMap sync.Map
 }
 
 func (controller *Controller) start(conn net.Conn) {
@@ -78,16 +78,16 @@ func (controller *Controller) start(conn net.Conn) {
 		lineSpl := strings.Split(string(res.b), ";")
 
 		switch lineSpl[0] {
-		case "c":
-			consumer := NewConsumer(ctx, lineSpl, controller)
-			controller.consumerMap.Store(consumer.ID, consumer)
-			err := consumer.Listen(conn)
-			controller.consumerMap.Delete(consumer.ID)
-			log.Warn(consumer.ctx, "listener.error", err)
-		case "p":
-			producer := NewProducer(ctx, lineSpl, conn, controller)
-			err := producer.listen()
-			producer.afterStop(err)
+		case "sr":
+			storyReader := newStoryReader(ctx, lineSpl, controller)
+			controller.readerMap.Store(storyReader.ID, storyReader)
+			err := storyReader.Listen(conn)
+			controller.readerMap.Delete(storyReader.ID)
+			log.Warn(storyReader.ctx, "storyReader.error", err)
+		case "sw":
+			storyWriter := newStoryWriter(ctx, lineSpl, conn, controller)
+			err := storyWriter.listen()
+			storyWriter.afterStop(err)
 		case "r":
 		}
 		conn.Close()
@@ -95,15 +95,15 @@ func (controller *Controller) start(conn net.Conn) {
 }
 
 func (controller *Controller) Reset() {
-	controller.consumerMap.Range(func(key, value interface{}) bool {
-		consumer := value.(*consumer)
+	controller.readerMap.Range(func(key, value interface{}) bool {
+		consumer := value.(*storyReader)
 		consumer.cancel()
-		controller.consumerMap.Delete(key)
+		controller.readerMap.Delete(key)
 		return true
 	})
-	controller.producerMap.Range(func(key, value interface{}) bool {
-		prod := value.(*producer)
-		controller.producerMap.Delete(key)
+	controller.writerMap.Range(func(key, value interface{}) bool {
+		prod := value.(*storyWriter)
+		controller.writerMap.Delete(key)
 		prod.Stop()
 		return true
 	})

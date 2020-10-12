@@ -40,10 +40,10 @@ func TestMain(m *testing.M) {
 func TestDifferentChannelConsumers(t *testing.T) {
 	c.book.maxLinesPerChapter = int64(50)
 	{
-		p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 		go func() {
 			for i := 0; i < 200; i++ {
-				_, err := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+				_, err := p.Write("topic-1", fmt.Sprintf("msg_%d", i))
 				assert.NoError(t, err)
 			}
 		}()
@@ -53,9 +53,9 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	lastMsg := make(chan bool)
 
 	go func() { // 160 lines
-		cli1, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli1.Handle(func(req gofabula.FabulaRequest) error {
-			if req.Line == 10 && req.Chapter == 3 {
+		cli1, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli1.Read(func(line gofabula.FabulaLine) error {
+			if line.Line == 10 && line.Chapter == 3 {
 				return fmt.Errorf("error")
 			}
 			totalMsgConsumed <- "ch_1"
@@ -64,9 +64,9 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		lastMsg <- true
 	}()
 	go func() { // 50 lines
-		cli2, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "2", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli2.Handle(func(req gofabula.FabulaRequest) error {
-			if req.Line == 0 && req.Chapter == 1 {
+		cli2, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli2.Read(func(line gofabula.FabulaLine) error {
+			if line.Line == 0 && line.Chapter == 1 {
 				return fmt.Errorf("error")
 			}
 			totalMsgConsumed <- "ch_2"
@@ -77,9 +77,9 @@ func TestDifferentChannelConsumers(t *testing.T) {
 
 	go func() {// wait, 105 lines
 		time.Sleep(1 * time.Second)
-		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "3", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		cli.Handle(func(req gofabula.FabulaRequest) error {
-			if req.Line == 5 && req.Chapter == 2 {
+		cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		cli.Read(func(line gofabula.FabulaLine) error {
+			if line.Line == 5 && line.Chapter == 2 {
 				return fmt.Errorf("error")
 			}
 			totalMsgConsumed <- "ch_3"
@@ -89,10 +89,10 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	}()
 
 	go func() { // only read 5 lines
-		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "3", Mark: gofabula.Mark{Chapter:2, Line:5}, Host: "localhost:9998"})
-		cli.Handle(func(req gofabula.FabulaRequest) error {
-			if req.Line == 10 && req.Chapter == 2 {
-				assert.Equal(t, "msg_105", req.Message)
+		cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter:2, Line:5}, Host: "localhost:9998"})
+		cli.Read(func(line gofabula.FabulaLine) error {
+			if line.Line == 10 && line.Chapter == 2 {
+				assert.Equal(t, "msg_105", line.Message)
 				return fmt.Errorf("error")
 			}
 			totalMsgConsumed <- "ch_4"
@@ -121,56 +121,17 @@ L:
 
 }
 
-func TestFromAheadOffset(t *testing.T) {
-	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
-
-	for i := 1; i <= 200; i++ {
-		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
-	}
-	cli1, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-	cli1.Handle(func(req gofabula.FabulaRequest) error {
-		if req.Line == 200 {
-			return fmt.Errorf("error")
-		}
-		return nil
-	})
-}
-
-func TestStrategyCustomOffset(t *testing.T) {
-	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
-
-	for i := 1; i <= 10; i++ {
-		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
-	}
-
-	lastMsgReceived := ""
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		p.Produce("topic-1", "myLastMessage")
-		cli.Handle(func(req gofabula.FabulaRequest) error {
-			lastMsgReceived = req.Message
-			return fmt.Errorf("error")
-		})
-		wg.Done()
-	}()
-
-	wg.Wait()
-	assert.Equal(t, "myLastMessage", lastMsgReceived)
-}
-
 func TestSyncProducer(t *testing.T) {
-	p, _ := gofabula.NewProducer(gofabula.ConfigP{Host: "localhost:9998"})
+	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 
 	for i := 1; i <= 10; i++ {
-		msgId, _ := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
+		mark, _ := p.Write("topic-1", fmt.Sprintf("msg_%d", i))
 		s, _ := gofabula.NewSync(gofabula.ConfigS{
-			Host:  "localhost:9998",
-			MsgId: msgId,
+			Host: "localhost:9998",
+			Mark: mark,
 		})
 		s.Sync(func(message gofabula.SyncMessage) bool {
+			fmt.Println(message.ConsumerID)
 			return true
 		})
 	}
@@ -180,10 +141,10 @@ func TestSyncProducer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gofabula.NewConsumer(gofabula.ConfigC{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
-		p.Produce("topic-1", "myLastMessage")
-		cli.Handle(func(req gofabula.FabulaRequest) error {
-			lastMsgReceived = req.Message
+		cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+		p.Write("topic-1", "myLastMessage")
+		cli.Read(func(line gofabula.FabulaLine) error {
+			lastMsgReceived = line.Message
 			return fmt.Errorf("error")
 		})
 		wg.Done()

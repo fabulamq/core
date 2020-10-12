@@ -110,27 +110,27 @@ func (b *book) Read(chapter int64) (chan *tail.Line, error) {
 	return t.Lines, nil
 }
 
-func (b *book) Write(bs []byte) (string, error) {
+func (b *book) Write(bs []byte) (int64, int64, error) {
 	b.l.Lock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {
-		return "", err
+		return 0, 0, err
 	}
 	b.addOffset()
 	if b.getOffset() == b.maxLinesPerChapter {
 		err = b.chapter.Close()
 		if err != nil {
-			return "", err
+			return 0, 0, err
 		}
 		b.addChapter()
 		b.resetOffset()
 		err = b.newChapter(b.getChapter())
 		if err != nil {
-			return "", err
+			return 0, 0, err
 		}
 	}
 	b.l.Unlock()
-	return fmt.Sprintf("%d_%d", b.getOffset(),b.getOffset()), nil
+	return b.getChapter(), b.getOffset(), nil
 }
 
 func (b *book) addOffset() {
