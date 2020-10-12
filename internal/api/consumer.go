@@ -30,8 +30,8 @@ func NewConsumer(ctx context.Context, lineSpl []string, c *Controller) *consumer
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
-	line, _ := strconv.ParseInt(lineSpl[2], 10, 64)
-	chapter, _ := strconv.ParseInt(lineSpl[3], 10, 64)
+	chapter, _ := strconv.ParseInt(lineSpl[2], 10, 64)
+	line, _ := strconv.ParseInt(lineSpl[3], 10, 64)
 	newConsumer := &consumer{
 		ID:         lineSpl[1],
 		Line:       line,
@@ -66,7 +66,7 @@ func (c *consumer) Listen(conn net.Conn) error {
 
 
 	for {
-		tail, err := c.controller.book.Read(c.Chapter)
+		chapter, err := c.controller.book.Read(c.Chapter)
 
 		if err != nil {
 			return err
@@ -76,7 +76,7 @@ func (c *consumer) Listen(conn net.Conn) error {
 			select {
 			case <-c.ctx.Done():
 				return fmt.Errorf("done ctx")
-			case line := <-tail:
+			case line := <- chapter:
 				msg := []byte(fmt.Sprintf("%d;%d;%s", c.Chapter, currLine, line.Text))
 				log.Info(c.ctx, fmt.Sprintf("consumer.Listen.readLine: [%s]", msg))
 				if err != nil {

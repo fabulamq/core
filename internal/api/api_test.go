@@ -44,7 +44,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	{
 		p, _ := gozeusmq.NewProducer(gozeusmq.ConfigP{Host: "localhost:9998"})
 		go func() {
-			for i := 1; i <= 200; i++ {
+			for i := 0; i < 200; i++ {
 				_, err := p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 				assert.NoError(t, err)
 			}
@@ -54,8 +54,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	totalMsgConsumed := make(chan string)
 	lastMsg := make(chan bool)
 
-	go func() {
-		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
+	go func() { // 160 lines
+		cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		cli1.Handle(func(req gozeusmq.ZeusRequest) error {
 			if req.Line == 10 && req.Chapter == 3 {
 				return fmt.Errorf("error")
@@ -65,8 +65,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		})
 		lastMsg <- true
 	}()
-	go func() {
-		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "2", Mark: "0_0", Host: "localhost:9998"})
+	go func() { // 50 lines
+		cli2, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "2", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		cli2.Handle(func(req gozeusmq.ZeusRequest) error {
 			if req.Line == 0 && req.Chapter == 1 {
 				return fmt.Errorf("error")
@@ -77,14 +77,27 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		lastMsg <- true
 	}()
 
-	go func() {
+	go func() {// wait, 105 lines
 		time.Sleep(1 * time.Second)
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: "0_0", Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			if req.Line == 5 && req.Chapter == 2 {
 				return fmt.Errorf("error")
 			}
 			totalMsgConsumed <- "ch_3"
+			return nil
+		})
+		lastMsg <- true
+	}()
+
+	go func() { // only read 5 lines
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "3", Mark: gozeusmq.Mark{Chapter:2, Line:5}, Host: "localhost:9998"})
+		cli.Handle(func(req gozeusmq.ZeusRequest) error {
+			if req.Line == 10 && req.Chapter == 2 {
+				assert.Equal(t, "msg_105", req.Message)
+				return fmt.Errorf("error")
+			}
+			totalMsgConsumed <- "ch_4"
 			return nil
 		})
 		lastMsg <- true
@@ -98,7 +111,7 @@ L:
 		select {
 		case <-lastMsg:
 			totalOut++
-			if totalOut == 3 {
+			if totalOut == 4 {
 				break L
 			}
 		case id := <-totalMsgConsumed:
@@ -106,7 +119,7 @@ L:
 			totalMsg++
 		}
 	}
-	assert.Equal(t, 315, int(totalMsg))
+	assert.Equal(t, 320, int(totalMsg))
 
 }
 
@@ -116,7 +129,7 @@ func TestFromAheadOffset(t *testing.T) {
 	for i := 1; i <= 200; i++ {
 		p.Produce("topic-1", fmt.Sprintf("msg_%d", i))
 	}
-	cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
+	cli1, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 	cli1.Handle(func(req gozeusmq.ZeusRequest) error {
 		if req.Line == 200 {
 			return fmt.Errorf("error")
@@ -137,7 +150,7 @@ func TestStrategyCustomOffset(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			lastMsgReceived = req.Message
@@ -169,7 +182,7 @@ func TestSyncProducer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: "0_0", Host: "localhost:9998"})
+		cli, _ := gozeusmq.NewConsumer(gozeusmq.ConfigC{ID: "1", Mark: gozeusmq.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		p.Produce("topic-1", "myLastMessage")
 		cli.Handle(func(req gozeusmq.ZeusRequest) error {
 			lastMsgReceived = req.Message
