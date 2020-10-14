@@ -16,7 +16,7 @@ type storyReaderStatus struct {
 
 type storyAuditor struct {
 	ID             string
-	mark           mark
+	mark           *mark
 	chReaderStatus chan storyReaderStatus
 	c              *publisher
 	conn           net.Conn
@@ -26,11 +26,11 @@ type storyAuditor struct {
 
 func newStoryAuditor(ctx context.Context, spl []string, conn net.Conn, c *publisher) *storyAuditor {
 	uid := uuid.New().String()
-	chapter,_ := strconv.ParseInt(spl[1], 10, 64)
-	line,_ := strconv.ParseInt(spl[2], 10, 64)
+	chapter,_ := strconv.ParseUint(spl[1], 10, 64)
+	line,_ := strconv.ParseUint(spl[2], 10, 64)
 	sa := &storyAuditor{
 		ID:         uid,
-		mark:       mark{
+		mark:       &mark{
 			chapter: chapter,
 			line:    line,
 		},
@@ -47,10 +47,16 @@ func newStoryAuditor(ctx context.Context, spl []string, conn net.Conn, c *publis
 
 func (sa storyAuditor) listen() error {
 	log.Info(sa.ctx, "storyAuditor.Listen")
-	write(sa.conn, []byte("ok"))
+	err := write(sa.conn, []byte("ok"))
+	if err != nil {
+		return err
+	}
+
+	mapReaderStatus := make(map[string]readerStatus)
 	sa.c.storyReaderMap.Range(func(key, value interface{}) bool {
 		storyReader := value.(*storyReader)
 		storyPoint := storyReader.storyPoint(sa.mark)
+		mapReaderStatus[storyReader.ID] = storyPoint
 		log.Info(sa.ctx, fmt.Sprintf("storyAuditor.Range: %v",storyReaderStatus{
 			ID:     storyReader.ID,
 			status: storyPoint,
@@ -61,9 +67,12 @@ func (sa storyAuditor) listen() error {
 	for {
 		select {
 		case rs := <- sa.chReaderStatus:
-			if rs.status == ahead {
-				continue
+			if status, ok := mapReaderStatus[rs.ID]; ok {
+				if status == rs.status {
+					continue
+				}
 			}
+			mapReaderStatus[rs.ID] = rs.status
 			log.Info(sa.ctx, fmt.Sprintf("storyAuditor.chReaderStatus: %v", rs))
 			write(sa.conn, []byte(fmt.Sprintf("%s;%s", rs.ID, rs.status)))
 		}

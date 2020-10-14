@@ -23,8 +23,8 @@ func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyR
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
-	chapter, _ := strconv.ParseInt(lineSpl[2], 10, 64)
-	line, _ := strconv.ParseInt(lineSpl[3], 10, 64)
+	chapter, _ := strconv.ParseUint(lineSpl[2], 10, 64)
+	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
 	newConsumer := &storyReader{
 		ID:         lineSpl[1],
 		mark: mark{
@@ -104,8 +104,10 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 					breakChapter = true
 				}
 
+				status := sr.storyPoint(sr.controller.book.mark)
+
 				sr.controller.auditor <- storyReaderStatus{
-					status: sr.storyPoint(sr.controller.book.mark),
+					status: status,
 					ID: sr.ID,
 				}
 
@@ -128,14 +130,14 @@ const  (
 	ahead     readerStatus = "ahead"
 )
 
-func (sr *storyReader) storyPoint(m mark) readerStatus {
+func (sr *storyReader) storyPoint(m *mark) readerStatus {
 	status := farAway
 	if sr.mark.getChapter() >= m.getChapter() {
 		status = almost
-		if sr.mark.getLine() == m.getLine() - 1 {
+		if sr.mark.getLine() == m.getLine() {
 			status = readIt
 		}
-		if sr.mark.getLine() > m.getLine() - 1 {
+		if sr.mark.getLine() > m.getLine() {
 			status = ahead
 		}
 	}

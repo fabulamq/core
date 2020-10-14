@@ -14,50 +14,51 @@ import (
 
 type book struct {
 	once            sync.Once
-	mark            mark
+	mark            *mark
 	chapter         *os.File
 	l               sync.Mutex
 	//
-	maxLinesPerChapter int64
+	maxLinesPerChapter uint64
 	Folder             string
 }
 
 type mark struct {
-	chapter int64
-	line    int64
+	chapter uint64
+	line    uint64
 }
 
 func (m *mark) addLine()  {
-	atomic.AddInt64(&m.line, 1)
+	atomic.AddUint64(&m.line, 1)
 }
 
 func (m *mark) addChapter()  {
-	atomic.AddInt64(&m.chapter, 1)
+	atomic.AddUint64(&m.chapter, 1)
 }
 
 func (m *mark) resetLine()  {
-	atomic.AddInt64(&m.line, -m.line)
+	atomic.AddUint64(&m.line, -m.line)
 }
 
-func (m *mark) getLine()int64 {
-	return atomic.LoadInt64(&m.line)
+func (m *mark) getLine()uint64 {
+	return atomic.LoadUint64(&m.line)
 }
 
-func (m *mark) getChapter()int64 {
-	return atomic.LoadInt64(&m.chapter)
+func (m *mark) getChapter()uint64 {
+	return atomic.LoadUint64(&m.chapter)
 }
 
 type bookConfig struct {
-	MaxLinerPerChapter int64
+	MaxLinerPerChapter uint64
 	Folder             string
 }
 
 func startBook(c bookConfig)(*book, error){
-	lastChapter := int64(0)
+	lastChapter := uint64(0)
 	hasBook := false
 
 	book := &book{
 		once:               sync.Once{},
+		mark:               &mark{},
 		maxLinesPerChapter: c.MaxLinerPerChapter,
 		Folder:             c.Folder,
 		l:                  sync.Mutex{},
@@ -73,8 +74,8 @@ func startBook(c bookConfig)(*book, error){
 		}
 		hasBook = true
 		ch, _ := strconv.Atoi(nameSpl[0])
-		if int64(ch) > lastChapter {
-			lastChapter = int64(ch)
+		if uint64(ch) > lastChapter {
+			lastChapter = uint64(ch)
 		}
 		return nil
 	})
@@ -103,17 +104,17 @@ func startBook(c bookConfig)(*book, error){
 	return book, nil
 }
 
-func lineCounter(r *os.File) (int64, error) {
+func lineCounter(r *os.File) (uint64, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Split(bufio.ScanLines)
 	k := 0
 	for scanner.Scan(){
 		k++
 	}
-	return int64(k), nil
+	return uint64(k), nil
 }
 
-func (b *book) newChapter(i int64)error{
+func (b *book) newChapter(i uint64)error{
 	file, err := os.Create(fmt.Sprintf("%s/%d.chapter", b.Folder, i))
 	if err != nil {
 		return err
@@ -123,7 +124,7 @@ func (b *book) newChapter(i int64)error{
 }
 
 
-func (b *book) Read(chapter int64) (chan *tail.Line, error) {
+func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
 	t, err := tail.TailFile(fmt.Sprintf("%s/%d.chapter", b.Folder, chapter), tail.Config{
 		Follow:   true,
 	})
@@ -133,7 +134,7 @@ func (b *book) Read(chapter int64) (chan *tail.Line, error) {
 	return t.Lines, nil
 }
 
-func (b *book) Write(bs []byte) (int64, int64, error) {
+func (b *book) Write(bs []byte) (uint64, uint64, error) {
 	b.l.Lock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {

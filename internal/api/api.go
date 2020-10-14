@@ -54,7 +54,7 @@ func Start(c Config) (*publisher, chan apiStatus) {
 type Config struct {
 	Host             string
 	Folder           string
-	OffsetPerChapter int64
+	OffsetPerChapter uint64
 }
 
 
