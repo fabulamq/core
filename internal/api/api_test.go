@@ -14,7 +14,7 @@ import (
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 // go test -v ./... -run TestDifferentChannelConsumers -failfast -race
 
-var c *Controller
+var c *publisher
 var status chan apiStatus
 
 func setup() {
@@ -123,39 +123,31 @@ L:
 
 }
 
-func TestSyncProducer(t *testing.T) {
+func TestSyncAuditor(t *testing.T) {
 	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 
 	mark, _ := p.Write("topic-1", fmt.Sprintf("msg_%d", 0))
+	p.Write("topic-1", "myLastMessage")
 
 	cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
-	s, _ := gofabula.NewSync(gofabula.ConfigS{
-		Host: "localhost:9998",
-		Mark: mark,
-	})
 	go func() {
-		s.Sync(func(message gofabula.SyncMessage) bool {
-			fmt.Println(message.ConsumerID)
+		gofabula.StartSyncMessage(gofabula.ConfigS{Host: "localhost:9998", Mark: mark},func(message gofabula.SyncMessage) bool {
+			if message.ConsumerID == "1" && (message.Status == gofabula.ReadIt || message.Status == gofabula.Ahead) {
+				return false
+			}
 			return true
 		})
 		wg.Done()
 	}()
 
-	lastMsgReceived := ""
-
 	go func() {
-		p.Write("topic-1", "myLastMessage")
 		cli.Read(func(line gofabula.FabulaLine) error {
-			lastMsgReceived = line.Message
-			return fmt.Errorf("error")
+			return nil
 		})
-		wg.Done()
 	}()
-
 	wg.Wait()
-	assert.Equal(t, "myLastMessage", lastMsgReceived)
 }

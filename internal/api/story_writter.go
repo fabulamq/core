@@ -13,12 +13,12 @@ type storyWriter struct {
 	ctx       context.Context
 	cancel    func()
 	hasFinish chan bool
-	*Controller
+	*publisher
 }
 
-func newStoryWriter(ctx context.Context, conn net.Conn, c *Controller) storyWriter {
+func newStoryWriter(ctx context.Context, conn net.Conn, c *publisher) storyWriter {
 	withCancel, cancel := context.WithCancel(ctx)
-	return storyWriter{conn: conn, Controller: c, ctx: withCancel, cancel: cancel, hasFinish: make(chan bool)}
+	return storyWriter{conn: conn, publisher: c, ctx: withCancel, cancel: cancel, hasFinish: make(chan bool)}
 }
 
 func (sw storyWriter) Stop() {

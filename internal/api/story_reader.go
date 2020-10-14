@@ -16,10 +16,10 @@ type storyReader struct {
 
 	mark      mark
 
-	controller *Controller
+	controller *publisher
 }
 
-func newStoryReader(ctx context.Context, lineSpl []string, c *Controller) *storyReader {
+func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyReader {
 	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
 	withCancel, cancel := context.WithCancel(ctxWirtId)
 
@@ -86,22 +86,31 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 					return err
 				}
 				if string(res.b) != "ok" {
+					sr.controller.auditor <- storyReaderStatus{
+						status: cantRead,
+						ID:     sr.ID,
+					}
 					return fmt.Errorf("NOK")
 				}
 
 				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.completed: [%s]", msg))
 
+				breakChapter := false
+
 				sr.mark.addLine()
 				if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
 					sr.mark.resetLine()
 					sr.mark.addChapter()
-					break Chapter
+					breakChapter = true
 				}
 
-
 				sr.controller.auditor <- storyReaderStatus{
-					status: sr.storyPoint(),
+					status: sr.storyPoint(sr.controller.book.mark),
 					ID: sr.ID,
+				}
+
+				if breakChapter {
+					break Chapter
 				}
 			}
 		}
@@ -112,18 +121,22 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 type readerStatus string
 
 const  (
-	almost  readerStatus = "almost"
-	farAway readerStatus = "faraway"
-	readIt  readerStatus = "readIt"
+	cantRead  readerStatus = "cantRead"
+	almost    readerStatus = "almost"
+	farAway   readerStatus = "faraway"
+	readIt    readerStatus = "readIt"
+	ahead     readerStatus = "ahead"
 )
 
-func (sr *storyReader) storyPoint() readerStatus {
+func (sr *storyReader) storyPoint(m mark) readerStatus {
 	status := farAway
-	currMark := sr.controller.book.mark
-	if sr.mark.getChapter() >= currMark.getChapter() {
+	if sr.mark.getChapter() >= m.getChapter() {
 		status = almost
-		if sr.mark.getLine() >= currMark.getLine() {
+		if sr.mark.getLine() == m.getLine() - 1 {
 			status = readIt
+		}
+		if sr.mark.getLine() > m.getLine() - 1 {
+			status = ahead
 		}
 	}
 	return status

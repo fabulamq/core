@@ -2,11 +2,8 @@ package api
 
 import (
 	"bytes"
-	"context"
-	"github.com/fabulamq/internal/infra/log"
 	"io"
 	"net"
-	"strings"
 	"sync"
 )
 
@@ -15,7 +12,7 @@ type apiStatus struct {
 	isReady bool
 }
 
-func Start(c Config) (*Controller, chan apiStatus) {
+func Start(c Config) (*publisher, chan apiStatus) {
 	chStatus := make(chan apiStatus)
 
 	book, err := startBook(bookConfig{
@@ -26,14 +23,13 @@ func Start(c Config) (*Controller, chan apiStatus) {
 		chStatus <- apiStatus{err: err, isReady: false}
 	}
 
-	controller := &Controller{
+	publisher := &publisher{
 		book:    book,
 		pLocker: sync.Mutex{},
 		locker:  sync.Mutex{},
 	}
 
-	isReady := controller.startAuditor()
-	<-isReady
+	<- publisher.startAuditor()
 
 	listener, err := net.Listen("tcp", c.Host)
 	if err != nil {
@@ -48,11 +44,11 @@ func Start(c Config) (*Controller, chan apiStatus) {
 			if err != nil {
 				chStatus <- apiStatus{err: err, isReady: false}
 			}
-			controller.acceptConn(conn)
+			publisher.acceptConn(conn)
 		}
 	}()
 
-	return controller, chStatus
+	return publisher, chStatus
 }
 
 type Config struct {
@@ -61,88 +57,6 @@ type Config struct {
 	OffsetPerChapter int64
 }
 
-type Controller struct {
-	pLocker sync.Mutex
-	book    *book
-	// general locker
-	locker sync.Mutex
-
-	storyReaderMap  sync.Map
-	storyWriterMap  sync.Map
-	storyAuditorMap sync.Map
-
-	auditor chan storyReaderStatus
-}
-
-func (controller *Controller) acceptConn(conn net.Conn) {
-	go func() {
-		ctx := context.Background()
-
-		chRes := readLine(conn)
-		res := <-chRes
-		if res.err != nil {
-			return
-		}
-		lineSpl := strings.Split(string(res.b), ";")
-
-		switch lineSpl[0] {
-		case "sr":
-			storyReader := newStoryReader(ctx, lineSpl, controller)
-			controller.storyReaderMap.Store(storyReader.ID, storyReader)
-			err := storyReader.Listen(conn)
-			controller.storyReaderMap.Delete(storyReader.ID)
-			log.Warn(storyReader.ctx, "storyReader.error", err)
-		case "sw":
-			storyWriter := newStoryWriter(ctx, conn, controller)
-			err := storyWriter.listen()
-			storyWriter.afterStop(err)
-		case "sa":
-			storyAuditor := newStoryAuditor(ctx, lineSpl, conn, controller)
-			storyAuditor.listen()
-			storyAuditor.close()
-		case "r":
-			// same logic as storyReader
-		}
-		conn.Close()
-	}()
-}
-
-func (controller *Controller) Reset() {
-	controller.storyReaderMap.Range(func(key, value interface{}) bool {
-		consumer := value.(*storyReader)
-		consumer.cancel()
-		controller.storyReaderMap.Delete(key)
-		return true
-	})
-	controller.storyWriterMap.Range(func(key, value interface{}) bool {
-		prod := value.(*storyWriter)
-		controller.storyWriterMap.Delete(key)
-		prod.Stop()
-		return true
-	})
-}
-
-func (controller *Controller) startAuditor() chan bool {
-	isReady := make(chan bool, 0)
-	saChan := make(chan storyReaderStatus, 0)
-	go func() {
-		isReady <- true
-		for {
-			select {
-			case sa := <-saChan:
-				go func() {
-					controller.storyAuditorMap.Range(func(key, value interface{}) bool {
-						auditor := value.(*storyAuditor)
-						auditor.chReaderStatus <- sa
-						return true
-					})
-				}()
-			}
-		}
-	}()
-	controller.auditor = saChan
-	return isReady
-}
 
 type readResult struct {
 	b   []byte

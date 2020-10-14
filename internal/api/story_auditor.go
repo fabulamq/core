@@ -18,17 +18,17 @@ type storyAuditor struct {
 	ID             string
 	mark           mark
 	chReaderStatus chan storyReaderStatus
-	c              *Controller
+	c              *publisher
 	conn           net.Conn
 	ctx            context.Context
 }
 
 
-func newStoryAuditor(ctx context.Context, spl []string, conn net.Conn, c *Controller) storyAuditor {
+func newStoryAuditor(ctx context.Context, spl []string, conn net.Conn, c *publisher) *storyAuditor {
 	uid := uuid.New().String()
 	chapter,_ := strconv.ParseInt(spl[1], 10, 64)
 	line,_ := strconv.ParseInt(spl[2], 10, 64)
-	sa := storyAuditor{
+	sa := &storyAuditor{
 		ID:         uid,
 		mark:       mark{
 			chapter: chapter,
@@ -50,13 +50,22 @@ func (sa storyAuditor) listen() error {
 	write(sa.conn, []byte("ok"))
 	sa.c.storyReaderMap.Range(func(key, value interface{}) bool {
 		storyReader := value.(*storyReader)
-		write(sa.conn ,[]byte(fmt.Sprintf("%s;%s", storyReader.ID, storyReader.storyPoint())))
+		storyPoint := storyReader.storyPoint(sa.mark)
+		log.Info(sa.ctx, fmt.Sprintf("storyAuditor.Range: %v",storyReaderStatus{
+			ID:     storyReader.ID,
+			status: storyPoint,
+		}))
+		write(sa.conn ,[]byte(fmt.Sprintf("%s;%s", storyReader.ID, storyPoint)))
 		return true
 	})
 	for {
 		select {
 		case rs := <- sa.chReaderStatus:
-			sa.conn.Write([]byte(fmt.Sprintf("%s;%s", rs.ID, rs.status)))
+			if rs.status == ahead {
+				continue
+			}
+			log.Info(sa.ctx, fmt.Sprintf("storyAuditor.chReaderStatus: %v", rs))
+			write(sa.conn, []byte(fmt.Sprintf("%s;%s", rs.ID, rs.status)))
 		}
 	}
 }
