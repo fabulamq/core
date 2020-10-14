@@ -14,8 +14,7 @@ type storyReader struct {
 	hasFinish chan bool
 	cancel    func()
 
-	Line      int64
-	Chapter   int64
+	mark      mark
 
 	controller *Controller
 }
@@ -28,8 +27,10 @@ func newStoryReader(ctx context.Context, lineSpl []string, c *Controller) *story
 	line, _ := strconv.ParseInt(lineSpl[3], 10, 64)
 	newConsumer := &storyReader{
 		ID:         lineSpl[1],
-		Line:       line,
-		Chapter:    chapter,
+		mark: mark{
+			chapter: chapter,
+			line:    line,
+		},
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
 		cancel:     cancel,
@@ -56,11 +57,9 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 		return err
 	}
 
-	currLine := sr.Line
-
 
 	for {
-		chapter, err := sr.controller.book.Read(sr.Chapter)
+		chapter, err := sr.controller.book.Read(sr.mark.chapter)
 
 		if err != nil {
 			return err
@@ -71,7 +70,7 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <- chapter:
-				msg := []byte(fmt.Sprintf("%d;%d;%s", sr.Chapter, currLine, line.Text))
+				msg := []byte(fmt.Sprintf("%d;%d;%s", sr.mark.getChapter(), sr.mark.getLine(), line.Text))
 				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine: [%s]", msg))
 				if err != nil {
 					return err
@@ -92,14 +91,40 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 
 				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.completed: [%s]", msg))
 
-				currLine++
-				if currLine == sr.controller.book.maxLinesPerChapter {
-					currLine = 0
-					sr.Chapter++
+				sr.mark.addLine()
+				if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
+					sr.mark.resetLine()
+					sr.mark.addChapter()
 					break Chapter
+				}
+
+
+				sr.controller.auditor <- storyReaderStatus{
+					status: sr.storyPoint(),
+					ID: sr.ID,
 				}
 			}
 		}
 	}
+}
 
+
+type readerStatus string
+
+const  (
+	almost  readerStatus = "almost"
+	farAway readerStatus = "faraway"
+	readIt  readerStatus = "readIt"
+)
+
+func (sr *storyReader) storyPoint() readerStatus {
+	status := farAway
+	currMark := sr.controller.book.mark
+	if sr.mark.getChapter() >= currMark.getChapter() {
+		status = almost
+		if sr.mark.getLine() >= currMark.getLine() {
+			status = readIt
+		}
+	}
+	return status
 }

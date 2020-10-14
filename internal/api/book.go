@@ -6,7 +6,6 @@ import (
 	"github.com/hpcloud/tail"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,13 +14,37 @@ import (
 
 type book struct {
 	once            sync.Once
-	currChapter     int64 // each chapter is a file
-	currChapterLine int64
+	mark            mark
 	chapter         *os.File
 	l               sync.Mutex
 	//
 	maxLinesPerChapter int64
 	Folder             string
+}
+
+type mark struct {
+	chapter int64
+	line    int64
+}
+
+func (m *mark) addLine()  {
+	atomic.AddInt64(&m.line, 1)
+}
+
+func (m *mark) addChapter()  {
+	atomic.AddInt64(&m.chapter, 1)
+}
+
+func (m *mark) resetLine()  {
+	atomic.AddInt64(&m.line, -m.line)
+}
+
+func (m *mark) getLine()int64 {
+	return atomic.LoadInt64(&m.line)
+}
+
+func (m *mark) getChapter()int64 {
+	return atomic.LoadInt64(&m.chapter)
 }
 
 type bookConfig struct {
@@ -74,9 +97,9 @@ func startBook(c bookConfig)(*book, error){
 	if err != nil {
 		return nil, err
 	}
-	book.currChapterLine = offset + 1
+	book.mark.line = offset + 1
 	book.chapter = file
-	book.currChapter = lastChapter
+	book.mark.chapter = lastChapter
 	return book, nil
 }
 
@@ -116,42 +139,19 @@ func (b *book) Write(bs []byte) (int64, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	b.addOffset()
-	if b.getOffset() == b.maxLinesPerChapter {
+	b.mark.addLine()
+	if b.mark.getLine() == b.maxLinesPerChapter {
 		err = b.chapter.Close()
 		if err != nil {
 			return 0, 0, err
 		}
-		b.addChapter()
-		b.resetOffset()
-		err = b.newChapter(b.getChapter())
+		b.mark.addChapter()
+		b.mark.resetLine()
+		err = b.newChapter(b.mark.getChapter())
 		if err != nil {
 			return 0, 0, err
 		}
 	}
 	b.l.Unlock()
-	return b.getChapter(), b.getOffset(), nil
-}
-
-func (b *book) addOffset() {
-	atomic.AddInt64(&b.currChapterLine, 1)
-	runtime.Gosched()
-}
-
-
-func (b *book) addChapter() {
-	atomic.AddInt64(&b.currChapter, 1)
-	runtime.Gosched()
-}
-
-func (b *book) getOffset() int64 {
-	return atomic.LoadInt64(&b.currChapterLine)
-}
-
-func (b *book) getChapter() int64 {
-	return atomic.LoadInt64(&b.currChapter)
-}
-
-func (b *book) resetOffset() {
-	atomic.AddInt64(&b.currChapterLine, -b.currChapterLine)
+	return b.mark.getChapter(), b.mark.getLine(), nil
 }

@@ -27,10 +27,14 @@ func Start(c Config) (*Controller, chan apiStatus) {
 	}
 
 	controller := &Controller{
-		book: book,
+		book:    book,
 		pLocker: sync.Mutex{},
 		locker:  sync.Mutex{},
 	}
+
+	isReady := controller.startAuditor()
+	<-isReady
+
 	listener, err := net.Listen("tcp", c.Host)
 	if err != nil {
 		chStatus <- apiStatus{err: err, isReady: false}
@@ -44,7 +48,7 @@ func Start(c Config) (*Controller, chan apiStatus) {
 			if err != nil {
 				chStatus <- apiStatus{err: err, isReady: false}
 			}
-			controller.start(conn)
+			controller.acceptConn(conn)
 		}
 	}()
 
@@ -61,12 +65,16 @@ type Controller struct {
 	pLocker sync.Mutex
 	book    *book
 	// general locker
-	locker    sync.Mutex
-	readerMap sync.Map
-	writerMap sync.Map
+	locker sync.Mutex
+
+	storyReaderMap  sync.Map
+	storyWriterMap  sync.Map
+	storyAuditorMap sync.Map
+
+	auditor chan storyReaderStatus
 }
 
-func (controller *Controller) start(conn net.Conn) {
+func (controller *Controller) acceptConn(conn net.Conn) {
 	go func() {
 		ctx := context.Background()
 
@@ -80,33 +88,60 @@ func (controller *Controller) start(conn net.Conn) {
 		switch lineSpl[0] {
 		case "sr":
 			storyReader := newStoryReader(ctx, lineSpl, controller)
-			controller.readerMap.Store(storyReader.ID, storyReader)
+			controller.storyReaderMap.Store(storyReader.ID, storyReader)
 			err := storyReader.Listen(conn)
-			controller.readerMap.Delete(storyReader.ID)
+			controller.storyReaderMap.Delete(storyReader.ID)
 			log.Warn(storyReader.ctx, "storyReader.error", err)
 		case "sw":
-			storyWriter := newStoryWriter(ctx, lineSpl, conn, controller)
+			storyWriter := newStoryWriter(ctx, conn, controller)
 			err := storyWriter.listen()
 			storyWriter.afterStop(err)
+		case "sa":
+			storyAuditor := newStoryAuditor(ctx, lineSpl, conn, controller)
+			storyAuditor.listen()
+			storyAuditor.close()
 		case "r":
+			// same logic as storyReader
 		}
 		conn.Close()
 	}()
 }
 
 func (controller *Controller) Reset() {
-	controller.readerMap.Range(func(key, value interface{}) bool {
+	controller.storyReaderMap.Range(func(key, value interface{}) bool {
 		consumer := value.(*storyReader)
 		consumer.cancel()
-		controller.readerMap.Delete(key)
+		controller.storyReaderMap.Delete(key)
 		return true
 	})
-	controller.writerMap.Range(func(key, value interface{}) bool {
+	controller.storyWriterMap.Range(func(key, value interface{}) bool {
 		prod := value.(*storyWriter)
-		controller.writerMap.Delete(key)
+		controller.storyWriterMap.Delete(key)
 		prod.Stop()
 		return true
 	})
+}
+
+func (controller *Controller) startAuditor() chan bool {
+	isReady := make(chan bool, 0)
+	saChan := make(chan storyReaderStatus, 0)
+	go func() {
+		isReady <- true
+		for {
+			select {
+			case sa := <-saChan:
+				go func() {
+					controller.storyAuditorMap.Range(func(key, value interface{}) bool {
+						auditor := value.(*storyAuditor)
+						auditor.chReaderStatus <- sa
+						return true
+					})
+				}()
+			}
+		}
+	}()
+	controller.auditor = saChan
+	return isReady
 }
 
 type readResult struct {

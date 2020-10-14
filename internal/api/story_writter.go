@@ -16,7 +16,7 @@ type storyWriter struct {
 	*Controller
 }
 
-func newStoryWriter(ctx context.Context, lineSpl []string, conn net.Conn, c *Controller) storyWriter {
+func newStoryWriter(ctx context.Context, conn net.Conn, c *Controller) storyWriter {
 	withCancel, cancel := context.WithCancel(ctx)
 	return storyWriter{conn: conn, Controller: c, ctx: withCancel, cancel: cancel, hasFinish: make(chan bool)}
 }
@@ -61,7 +61,7 @@ func (sw storyWriter) listen() error {
 
 func (sw *storyWriter) store() {
 	sw.pLocker.Lock()
-	sw.writerMap.Store(uuid.New().String(), sw)
+	sw.storyWriterMap.Store(uuid.New().String(), sw)
 	sw.pLocker.Unlock()
 }
 

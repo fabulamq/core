@@ -18,11 +18,13 @@ var c *Controller
 var status chan apiStatus
 
 func setup() {
-	os.RemoveAll("/home/kanczuk/go/src/github.com/zeusmq/.data/")
-	os.Mkdir("/home/kanczuk/go/src/github.com/zeusmq/.data", os.ModePerm)
+	path, _ := os.Getwd()
+	fmt.Println(path)
+	os.RemoveAll("/home/kanczuk/go/src/github.com/fabulamq/.data/")
+	os.Mkdir("/home/kanczuk/go/src/github.com/fabulamq/.data", os.ModePerm)
 	c, status = Start(Config{
 		Host:             "localhost:9998",
-		Folder:           "/home/kanczuk/go/src/github.com/zeusmq/.data",
+		Folder:           "/home/kanczuk/go/src/github.com/fabulamq/.data",
 		OffsetPerChapter: 10,
 	})
 	<-status
@@ -43,7 +45,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 		go func() {
 			for i := 0; i < 200; i++ {
-				_, err := p.Write("topic-1", fmt.Sprintf("msg_%d", i))
+				_, err := p.Write("topic-1", fmt.Sprintf("msg_%d\n testing second line to discard", i))
 				assert.NoError(t, err)
 			}
 		}()
@@ -124,24 +126,28 @@ L:
 func TestSyncProducer(t *testing.T) {
 	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 
-	for i := 1; i <= 10; i++ {
-		mark, _ := p.Write("topic-1", fmt.Sprintf("msg_%d", i))
-		s, _ := gofabula.NewSync(gofabula.ConfigS{
-			Host: "localhost:9998",
-			Mark: mark,
-		})
+	mark, _ := p.Write("topic-1", fmt.Sprintf("msg_%d", 0))
+
+	cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	s, _ := gofabula.NewSync(gofabula.ConfigS{
+		Host: "localhost:9998",
+		Mark: mark,
+	})
+	go func() {
 		s.Sync(func(message gofabula.SyncMessage) bool {
 			fmt.Println(message.ConsumerID)
 			return true
 		})
-	}
+		wg.Done()
+	}()
 
 	lastMsgReceived := ""
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	go func() {
-		cli, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter:0, Line:0}, Host: "localhost:9998"})
 		p.Write("topic-1", "myLastMessage")
 		cli.Read(func(line gofabula.FabulaLine) error {
 			lastMsgReceived = line.Message
