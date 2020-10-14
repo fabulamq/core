@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/fabulamq/internal/infra/log"
+	"github.com/fabulamq/core/internal/infra/log"
 	"github.com/google/uuid"
 	"net"
 	"strconv"

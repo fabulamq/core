@@ -2,7 +2,7 @@ package api
 
 import (
 	"fmt"
-	"github.com/go-fabula/pkg/gofabula"
+	"github.com/fabulamq/go-fabula/pkg/gofabula"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"strings"
@@ -13,7 +13,6 @@ import (
 
 // go test -v ./... -p 1 -count=1
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
-// go test -v ./... -run -count=1 TestDifferentChannelConsumers -failfast -race
 
 var c *publisher
 var status chan apiStatus

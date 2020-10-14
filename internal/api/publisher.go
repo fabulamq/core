@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"github.com/fabulamq/internal/infra/log"
+	"github.com/fabulamq/core/internal/infra/log"
 	"net"
 	"strings"
 	"sync"
