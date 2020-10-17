@@ -9,10 +9,9 @@ import (
 )
 
 type publisher struct {
-	pLocker sync.Mutex
-	book    *book
-	// general locker
 	locker sync.Mutex
+	book   *book
+	// general locker
 
 	storyReaderMap  sync.Map
 	storyWriterMap  sync.Map

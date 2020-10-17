@@ -37,7 +37,7 @@ func (sw storyWriter) listen() error {
 			if res.err != nil {
 				return res.err
 			}
-			sw.pLocker.Lock()
+			sw.locker.Lock()
 
 			if len(producerMsg) == 0 {
 				return fmt.Errorf("nil message")
@@ -53,19 +53,19 @@ func (sw storyWriter) listen() error {
 			if err != nil {
 				return err
 			}
-			sw.pLocker.Unlock()
+			sw.locker.Unlock()
 			log.Info(sw.ctx, fmt.Sprintf("storyWriter.Listen.SendedOK: [%s]", producerMsg))
 		}
 	}
 }
 
 func (sw *storyWriter) store() {
-	sw.pLocker.Lock()
+	sw.locker.Lock()
 	sw.storyWriterMap.Store(uuid.New().String(), sw)
-	sw.pLocker.Unlock()
+	sw.locker.Unlock()
 }
 
 func (sw storyWriter) afterStop(err error) {
-	sw.pLocker.Unlock()
+	sw.locker.Unlock()
 	log.Warn(sw.ctx, "storyWriter.Listen.err", err)
 }

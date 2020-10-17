@@ -40,6 +40,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestDifferentChannelConsumers(t *testing.T) {
 	c.book.maxLinesPerChapter = uint64(50)
 	{

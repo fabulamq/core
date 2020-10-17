@@ -24,9 +24,8 @@ func Start(c Config) (*publisher, chan apiStatus) {
 	}
 
 	publisher := &publisher{
-		book:    book,
-		pLocker: sync.Mutex{},
-		locker:  sync.Mutex{},
+		book:   book,
+		locker: sync.Mutex{},
 	}
 
 	<- publisher.startAuditor()
