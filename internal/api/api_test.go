@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/fabulamq/core/internal/infra/generator"
 	"github.com/fabulamq/go-fabula/pkg/gofabula"
 	"github.com/stretchr/testify/assert"
 	"os"
@@ -47,7 +48,10 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 		go func() {
 			for i := 0; i < 200; i++ {
-				_, err := p.Write("topic-1", fmt.Sprintf("msg_%d\n testing second line to discard", i))
+				if i == 105 {
+					p.Write("topic-1", "msg_105")
+				}
+				_, err := p.Write("topic-1", generator.NewFooBar())
 				assert.NoError(t, err)
 			}
 		}()
@@ -89,6 +93,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 			totalMsgConsumed <- "ch_3"
 			return nil
 		})
+		lastMsg <- true
 	}()
 
 	go func() { // only read 5 lines
