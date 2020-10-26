@@ -28,8 +28,6 @@ func Start(c Config) (*publisher, chan apiStatus) {
 		locker: sync.Mutex{},
 	}
 
-	<- publisher.startAuditor()
-
 	listener, err := net.Listen("tcp", c.Host)
 	if err != nil {
 		chStatus <- apiStatus{err: err, isReady: false}

@@ -86,10 +86,6 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 					return err
 				}
 				if string(res.b) != "ok" {
-					sr.controller.auditor <- storyReaderStatus{
-						status: cantRead,
-						ID:     sr.ID,
-					}
 					return fmt.Errorf("NOK")
 				}
 
@@ -104,42 +100,10 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 					breakChapter = true
 				}
 
-				status := sr.storyPoint(sr.controller.book.mark)
-
-				sr.controller.auditor <- storyReaderStatus{
-					status: status,
-					ID: sr.ID,
-				}
-
 				if breakChapter {
 					break Chapter
 				}
 			}
 		}
 	}
-}
-
-
-type readerStatus string
-
-const  (
-	cantRead  readerStatus = "cantRead"
-	almost    readerStatus = "almost"
-	farAway   readerStatus = "faraway"
-	readIt    readerStatus = "readIt"
-	ahead     readerStatus = "ahead"
-)
-
-func (sr *storyReader) storyPoint(m *mark) readerStatus {
-	status := farAway
-	if sr.mark.getChapter() >= m.getChapter() {
-		status = almost
-		if sr.mark.getLine() == m.getLine() {
-			status = readIt
-		}
-		if sr.mark.getLine() > m.getLine() {
-			status = ahead
-		}
-	}
-	return status
 }

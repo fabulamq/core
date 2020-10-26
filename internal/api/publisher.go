@@ -16,8 +16,6 @@ type publisher struct {
 	storyReaderMap  sync.Map
 	storyWriterMap  sync.Map
 	storyAuditorMap sync.Map
-
-	auditor chan storyReaderStatus
 }
 
 func (publisher *publisher) acceptConn(conn net.Conn) {
@@ -42,10 +40,6 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			storyWriter := newStoryWriter(ctx, conn, publisher)
 			err := storyWriter.listen()
 			storyWriter.afterStop(err)
-		case "sa":
-			storyAuditor := newStoryAuditor(ctx, lineSpl, conn, publisher)
-			storyAuditor.listen()
-			storyAuditor.close()
 		case "r":
 			// same logic as storyReader
 		}
@@ -66,26 +60,4 @@ func (publisher *publisher) Reset() {
 		prod.Stop()
 		return true
 	})
-}
-
-func (publisher *publisher) startAuditor() chan bool {
-	isReady := make(chan bool, 0)
-	saChan := make(chan storyReaderStatus, 0)
-	go func() {
-		isReady <- true
-		for {
-			select {
-			case sa := <-saChan:
-				go func() {
-					publisher.storyAuditorMap.Range(func(key, value interface{}) bool {
-						auditor := value.(*storyAuditor)
-						auditor.chReaderStatus <- sa
-						return true
-					})
-				}()
-			}
-		}
-	}()
-	publisher.auditor = saChan
-	return isReady
 }
