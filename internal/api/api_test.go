@@ -15,22 +15,14 @@ import (
 // go test -v ./... -p 1 -count=1
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 
-var c *publisher
-var status chan apiStatus
+func getPath()string{
+	dir, _ := os.Getwd()
+	return strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data"
+}
 
 func setup() {
-	dir, _ := os.Getwd()
-	path := strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data"
-
-	os.RemoveAll(path + "/")
-	os.Mkdir(path, os.ModePerm)
-	c, status = Start(Config{
-		Host:             "localhost:9998",
-		Folder:           path,
-		OffsetPerChapter: 10,
-	})
-	<-status
-	c.Reset()
+	os.RemoveAll(getPath() + "/")
+	os.Mkdir(getPath(), os.ModePerm)
 }
 
 var consumerOffset sync.Map
@@ -43,7 +35,12 @@ func TestMain(m *testing.M) {
 
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestDifferentChannelConsumers(t *testing.T) {
-	c.book.maxLinesPerChapter = uint64(50)
+	_, status := Start(Config{
+		Folder:           getPath(),
+		OffsetPerChapter: 50,
+	})
+	<-status
+
 	{
 		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
 		go func() {
@@ -127,4 +124,33 @@ L:
 	}
 	assert.Equal(t, 320, int(totalMsg))
 
+}
+
+func TestMultipleReplicas(t *testing.T) {
+	_, s1 := Start(Config{
+		Folder:           getPath(),
+		Port:  "9990",
+		Hosts: []string{"localhost:9991", "localhost:9992"},
+		OffsetPerChapter: 10,
+		Weight: 100,
+	})
+	<-s1
+
+	_, s2 := Start(Config{
+		Folder:           getPath(),
+		Port:  "9991",
+		Hosts: []string{"localhost:9990", "localhost:9992"},
+		OffsetPerChapter: 10,
+		Weight: 90,
+	})
+	<-s2
+
+	_, s3 := Start(Config{
+		Folder:           getPath(),
+		Port:  "9992",
+		Hosts: []string{"localhost:9990", "localhost:9991"},
+		OffsetPerChapter: 10,
+		Weight: 80,
+	})
+	<-s3
 }

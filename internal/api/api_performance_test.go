@@ -11,7 +11,7 @@ import (
 
 // go test -v ./...  -count=1 -run TestAuditorWithTwoChapters -failfast -race
 func TestWritePerformance(t *testing.T) {
-	c.book.maxLinesPerChapter = uint64(100000)
+	//c.book.maxLinesPerChapter = uint64(100000)
 
 	total := 0.0
 	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})

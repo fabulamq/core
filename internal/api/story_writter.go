@@ -67,5 +67,5 @@ func (sw *storyWriter) store() {
 
 func (sw storyWriter) afterStop(err error) {
 	sw.locker.Unlock()
-	log.Warn(sw.ctx, "storyWriter.Listen.err", err)
+	log.Warn(sw.ctx, "storyWriter.Listen.Err", err)
 }

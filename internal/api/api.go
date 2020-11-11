@@ -3,57 +3,45 @@ package api
 import (
 	"bytes"
 	"io"
-	"net"
-	"sync"
 )
 
 type apiStatus struct {
-	err     error
-	isReady bool
+	Err     error
+	IsReady bool
+	kind    publisherKind
 }
 
-func Start(c Config) (*publisher, chan apiStatus) {
-	chStatus := make(chan apiStatus)
+type publisherKind string
 
-	book, err := startBook(bookConfig{
-		MaxLinerPerChapter: c.OffsetPerChapter,
-		Folder:             c.Folder,
-	})
-	if err != nil {
-		chStatus <- apiStatus{err: err, isReady: false}
-	}
+const (
+	Master  publisherKind = "master"
+	Replica publisherKind = "replica"
+)
 
-	publisher := &publisher{
-		book:   book,
-		locker: sync.Mutex{},
-	}
-
-	listener, err := net.Listen("tcp", c.Host)
-	if err != nil {
-		chStatus <- apiStatus{err: err, isReady: false}
-	}
-
+func Start(c Config) (Place, chan apiStatus) {
+	place, chStatus := DeployPlace(c)
 	go func() {
-		chStatus <- apiStatus{err: nil, isReady: true}
+		chStatus <- apiStatus{Err: nil, IsReady: true}
 		for {
-			conn, err := listener.Accept()
+			conn, err := place.accept()
 
 			if err != nil {
-				chStatus <- apiStatus{err: err, isReady: false}
+				chStatus <- apiStatus{Err: err, IsReady: false}
 			}
-			publisher.acceptConn(conn)
+			place.acceptConn(conn)
 		}
 	}()
 
-	return publisher, chStatus
+	return place, chStatus
 }
 
 type Config struct {
-	Host             string
+	Port             string
+	Weight           int
+	Hosts            []string
 	Folder           string
 	OffsetPerChapter uint64
 }
-
 
 type readResult struct {
 	b   []byte

@@ -11,11 +11,17 @@ import (
 type publisher struct {
 	locker sync.Mutex
 	book   *book
+
+	listener net.Listener
 	// general locker
 
 	storyReaderMap  sync.Map
 	storyWriterMap  sync.Map
 	storyAuditorMap sync.Map
+}
+
+func (publisher publisher) accept() (net.Conn, error) {
+	return publisher.listener.Accept()
 }
 
 func (publisher *publisher) acceptConn(conn net.Conn) {
@@ -47,7 +53,7 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 	}()
 }
 
-func (publisher *publisher) Reset() {
+func (publisher *publisher) reset() {
 	publisher.storyReaderMap.Range(func(key, value interface{}) bool {
 		consumer := value.(*storyReader)
 		consumer.cancel()
@@ -60,4 +66,9 @@ func (publisher *publisher) Reset() {
 		prod.Stop()
 		return true
 	})
+}
+
+func (publisher *publisher) Stop() {
+	publisher.reset()
+	publisher.listener.Close()
 }
