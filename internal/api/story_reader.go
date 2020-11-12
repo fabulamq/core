@@ -14,9 +14,10 @@ type storyReader struct {
 	hasFinish chan bool
 	cancel    func()
 
-	mark      mark
+	mark mark
 
-	controller *publisher
+	breakEvenMark mark
+	controller    *publisher
 }
 
 func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyReader {
@@ -26,10 +27,14 @@ func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyR
 	chapter, _ := strconv.ParseUint(lineSpl[2], 10, 64)
 	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
 	newConsumer := &storyReader{
-		ID:         lineSpl[1],
+		ID: lineSpl[1],
 		mark: mark{
 			chapter: chapter,
 			line:    line,
+		},
+		breakEvenMark: mark{
+			chapter: c.book.mark.chapter,
+			line:    c.book.mark.line,
 		},
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
@@ -57,7 +62,6 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 		return err
 	}
 
-
 	for {
 		chapter, err := sr.controller.book.Read(sr.mark.chapter)
 
@@ -65,12 +69,13 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 			return err
 		}
 
-		Chapter: for {
+	Chapter:
+		for {
 			select {
 			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
-			case line := <- chapter:
-				msg := []byte(fmt.Sprintf("%d;%d;%s", sr.mark.getChapter(), sr.mark.getLine(), line.Text))
+			case line := <-chapter:
+				msg := []byte(fmt.Sprintf("%d;%d;%t;%s", sr.mark.getChapter(), sr.mark.getLine(), sr.mark.isBefore(sr.breakEvenMark), line.Text))
 				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine: [%s]", msg))
 				if err != nil {
 					return err
