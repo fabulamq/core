@@ -9,6 +9,8 @@ import (
 )
 
 type publisher struct {
+	publisherKind publisherKind
+
 	locker sync.Mutex
 	book   *book
 
@@ -19,6 +21,7 @@ type publisher struct {
 	storyWriterMap  sync.Map
 	storyAuditorMap sync.Map
 }
+
 
 func (publisher publisher) accept() (net.Conn, error) {
 	return publisher.listener.Accept()

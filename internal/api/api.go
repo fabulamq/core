@@ -14,25 +14,28 @@ type apiStatus struct {
 type publisherKind string
 
 const (
+	Unique  publisherKind = "unique"
 	Master  publisherKind = "master"
 	Replica publisherKind = "replica"
 )
 
-func Start(c Config) (Place, chan apiStatus) {
-	place, chStatus := DeployPlace(c)
+func Start(c Config) (*publisher, chan apiStatus) {
+	chPlace, chStatus := deployPlace(c)
+	publisher := new(publisher)
 	go func() {
 		chStatus <- apiStatus{Err: nil, IsReady: true}
+		publisher = <- chPlace
 		for {
-			conn, err := place.accept()
+			conn, err := publisher.accept()
 
 			if err != nil {
 				chStatus <- apiStatus{Err: err, IsReady: false}
 			}
-			place.acceptConn(conn)
+			publisher.acceptConn(conn)
 		}
 	}()
 
-	return place, chStatus
+	return publisher, chStatus
 }
 
 type Config struct {

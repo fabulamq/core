@@ -54,6 +54,13 @@ func (m *mark) isBefore(otherMark mark) bool {
 	return true
 }
 
+func (m *mark) isEqual(otherMark mark) bool {
+	if m.chapter == otherMark.chapter && m.line == otherMark.line {
+		return true
+	}
+	return false
+}
+
 type bookConfig struct {
 	MaxLinerPerChapter uint64
 	Folder             string

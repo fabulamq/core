@@ -171,7 +171,6 @@ func TestMultipleReplicas(t *testing.T) {
 		OffsetPerChapter: 10,
 		Weight:           100,
 	})
-	<-s1
 
 	_, s2 := Start(Config{
 		Folder:           getPath(),
@@ -180,7 +179,6 @@ func TestMultipleReplicas(t *testing.T) {
 		OffsetPerChapter: 10,
 		Weight:           90,
 	})
-	<-s2
 
 	_, s3 := Start(Config{
 		Folder:           getPath(),
@@ -189,5 +187,15 @@ func TestMultipleReplicas(t *testing.T) {
 		OffsetPerChapter: 10,
 		Weight:           80,
 	})
-	<-s3
+
+	for {
+		select {
+		case status := <- s1:
+			fmt.Println(status)
+		case status := <- s2:
+			fmt.Println(status)
+		case status := <- s3:
+			fmt.Println(status)
+		}
+	}
 }
