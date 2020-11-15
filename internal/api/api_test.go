@@ -2,14 +2,15 @@ package api
 
 import (
 	"fmt"
-	"github.com/fabulamq/core/internal/infra/generator"
-	"github.com/fabulamq/go-fabula/pkg/gofabula"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fabulamq/core/internal/infra/generator"
+	"github.com/fabulamq/go-fabula/pkg/gofabula"
+	"github.com/stretchr/testify/assert"
 )
 
 // go test -v ./... -p 1 -count=1
@@ -61,7 +62,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 3 {
-				return fmt.Errorf("error")
+				return fmt.Errorf("error on ID 1")
 			}
 			totalMsgConsumed <- "ch_1"
 			return nil
@@ -72,7 +73,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 0 && tail.Chapter == 1 {
-				return fmt.Errorf("error")
+				fmt.Println("error on ID 2")
+				return fmt.Errorf("error on ID 2")
 			}
 			totalMsgConsumed <- "ch_2"
 			return nil
@@ -85,7 +87,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 5 && tail.Chapter == 2 {
-				return fmt.Errorf("error")
+				fmt.Println("error on ID 3")
+				return fmt.Errorf("error on ID 3")
 			}
 			totalMsgConsumed <- "ch_3"
 			return nil
@@ -94,11 +97,12 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	}()
 
 	go func() { // only read 5 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "4", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Host: "localhost:9998"})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 2 {
 				assert.Equal(t, "msg_105", tail.Message)
-				return fmt.Errorf("error")
+				fmt.Println("error on ID 4")
+				return fmt.Errorf("error on ID 4")
 			}
 			totalMsgConsumed <- "ch_4"
 			return nil
@@ -123,6 +127,43 @@ L:
 		}
 	}
 	assert.Equal(t, 320, int(totalMsg))
+
+}
+
+// go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
+func TestReadingFlow(t *testing.T) {
+	_, status := Start(Config{
+		Folder:           getPath(),
+		OffsetPerChapter: 10,
+	})
+	<-status
+
+	{
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
+		go func() {
+			for i := 0; i < 400; i++ {
+				time.Sleep(10 * time.Millisecond)
+				_, err := p.Write("topic-1", generator.NewFooBar())
+				assert.NoError(t, err)
+			}
+		}()
+	}
+
+	hasEnd := make(chan bool)
+
+	go func() {
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader.Read(func(tail gofabula.FabulaTail) error {
+			fmt.Println("read here 1: ", tail.Chapter, tail.Line)
+			if tail.Line == 5 && tail.Chapter == 38 {
+				hasEnd <- true
+				return fmt.Errorf("error on ID 1")
+			}
+			return nil
+		})
+	}()
+
+	<-hasEnd
 
 }
 
@@ -190,11 +231,11 @@ func TestMultipleReplicas(t *testing.T) {
 
 	for {
 		select {
-		case status := <- s1:
+		case status := <-s1:
 			fmt.Println(status)
-		case status := <- s2:
+		case status := <-s2:
 			fmt.Println(status)
-		case status := <- s3:
+		case status := <-s3:
 			fmt.Println(status)
 		}
 	}

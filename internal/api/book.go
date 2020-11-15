@@ -138,8 +138,11 @@ func (b *book) newChapter(i uint64) error {
 }
 
 func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
-	t, err := tail.TailFile(fmt.Sprintf("%s/%d.chapter", b.Folder, chapter), tail.Config{
-		Follow: true,
+	chapterName := fmt.Sprintf("%s/%d.chapter", b.Folder, chapter)
+
+	t, err := tail.TailFile(chapterName, tail.Config{
+		Poll:        true,
+		Follow:      true,
 	})
 	if err != nil {
 		return nil, err

@@ -26,7 +26,7 @@ func Start(c Config) (*publisher, chan apiStatus) {
 		chStatus <- apiStatus{Err: nil, IsReady: true}
 		publisher = <- chPlace
 		for {
-			conn, err := publisher.accept()
+			conn, err := publisher.listener.Accept()
 
 			if err != nil {
 				chStatus <- apiStatus{Err: err, IsReady: false}

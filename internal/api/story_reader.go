@@ -33,8 +33,8 @@ func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyR
 			line:    line,
 		},
 		breakEvenMark: mark{
-			chapter: c.book.mark.chapter,
-			line:    c.book.mark.line,
+			chapter: c.book.mark.getChapter(),
+			line:    c.book.mark.getLine(),
 		},
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
@@ -63,7 +63,7 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 	}
 
 	for {
-		chapter, err := sr.controller.book.Read(sr.mark.chapter)
+		tailLine, err := sr.controller.book.Read(sr.mark.chapter)
 
 		if err != nil {
 			return err
@@ -74,9 +74,9 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 			select {
 			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
-			case line := <-chapter:
+			case line := <-tailLine:
 				msg := []byte(fmt.Sprintf("%d;%d;%t;%s", sr.mark.getChapter(), sr.mark.getLine(), sr.mark.isBefore(sr.breakEvenMark), line.Text))
-				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine: [%s]", msg))
+				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine(%s): [%s]",sr.ID, msg))
 				if err != nil {
 					return err
 				}
@@ -94,16 +94,17 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 					return fmt.Errorf("NOK")
 				}
 
-				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.completed: [%s]", msg))
-
 				breakChapter := false
 
 				sr.mark.addLine()
 				if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
+					log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.newChapter(%s)", sr.ID))
 					sr.mark.resetLine()
 					sr.mark.addChapter()
 					breakChapter = true
 				}
+
+				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.completed(%s): [%s]", sr.ID, msg))
 
 				if breakChapter {
 					break Chapter
