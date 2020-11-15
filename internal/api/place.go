@@ -2,9 +2,7 @@ package api
 
 import (
 	"bufio"
-	"context"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -41,10 +39,8 @@ func (hinfos hostsInfo) getTheOne() *hostInfo {
 	return selectedHost
 }
 
-func deployPlace(c Config) (chan *publisher, chan apiStatus) {
-	ctx := context.Background()
+func deployPublisher(c Config) (*publisher, chan apiStatus) {
 	chStatus := make(chan apiStatus)
-	chPlace := make(chan *publisher)
 
 	book, err := startBook(bookConfig{
 		MaxLinerPerChapter: c.OffsetPerChapter,
@@ -66,41 +62,41 @@ func deployPlace(c Config) (chan *publisher, chan apiStatus) {
 
 	totalInstances := len(c.Hosts) + 1
 	if totalInstances == 1 {
-		go func() {
-			chPlace <- &publisher{
-				publisherKind: Unique,
-				book:          book,
-				listener:      listener,
-				locker:        sync.Mutex{},
-			}
-		}()
-		return chPlace, chStatus
+		return &publisher{
+			publisherKind: Unique,
+			book:          book,
+			weight:        c.Weight,
+			listener:      listener,
+			locker:        sync.Mutex{},
+		}, chStatus
 	}
-	// ask who is the...
 
+
+	// read and decide
+
+	return &publisher{
+		publisherKind: Undefined,
+		book:          book,
+		weight:        c.Weight,
+		listener:      listener,
+		locker:        sync.Mutex{},
+	}, chStatus
+}
+
+func stateControl()chan publisherKind {
+	pkChan := make(chan publisherKind)
+	return pkChan
+}
+
+func definePlace(c Config, p publisher){
+	totalInstances := len(c.Hosts) + 1
 	hostsInfo := make(hostsInfo, 0)
 
 	hostsInfo["local"] = hostInfo{
 		host:   "local",
 		weight: c.Weight,
-		mark:   book.mark,
+		mark:   p.book.mark,
 	}
-
-	// write to other hosts
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			_, err = conn.Write([]byte(fmt.Sprintf("%d;%d;%d\n", c.Weight, book.mark.chapter, book.mark.line)))
-			if err != nil {
-				return
-			}
-		}
-	}()
-
-	// read and decide
 	go func() {
 		for {
 			activeInstances := 0
@@ -145,36 +141,15 @@ func deployPlace(c Config) (chan *publisher, chan apiStatus) {
 				time.Sleep(1 * time.Second)
 				continue
 			}
-			err = listener.Close()
-			if err != nil {
-				log.Fatal(ctx, err.Error())
-			}
 			// check map status
 			hostInfo := hostsInfo.getTheOne()
 			if hostInfo.host == "local" {
-				chPlace <- &publisher{
-					publisherKind: Master,
-					book:          book,
-					listener:      listener,
-					locker:        sync.Mutex{},
-				}
+				// headquarter
 			}else {
-				chPlace <- &publisher{
-					publisherKind: Replica,
-					book:          book,
-					listener:      listener,
-					locker:        sync.Mutex{},
-				}
+				// branch
 			}
 			return
 		}
 
 	}()
-	return chPlace, chStatus
-}
-
-type placeStatus struct {
-	Weight int
-	Mark   mark
-	Status string
 }

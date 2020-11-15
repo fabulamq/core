@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"github.com/fabulamq/core/internal/infra/log"
 	"net"
 	"strings"
@@ -13,7 +14,7 @@ type publisher struct {
 
 	locker sync.Mutex
 	book   *book
-
+	weight int
 	listener net.Listener
 	// general locker
 
@@ -40,6 +41,9 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 
 		switch lineSpl[0] {
 		case "sr":
+			if !publisher.publisherKind.acceptStoryReader() {
+				break
+			}
 			storyReader := newStoryReader(ctx, lineSpl, publisher)
 			publisher.storyReaderMap.Store(storyReader.ID, storyReader)
 			err := storyReader.Listen(conn)
@@ -51,6 +55,8 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			storyWriter.afterStop(err)
 		case "r":
 			// same logic as storyReader
+		case "info":
+			conn.Write([]byte(fmt.Sprintf("%d;%d;%d\n", publisher.weight, publisher.book.mark.getChapter(), publisher.book.mark.getLine())))
 		}
 		conn.Close()
 	}()

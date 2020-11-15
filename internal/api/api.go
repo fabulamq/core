@@ -14,17 +14,40 @@ type apiStatus struct {
 type publisherKind string
 
 const (
-	Unique  publisherKind = "unique"
-	Master  publisherKind = "master"
-	Replica publisherKind = "replica"
+	Undefined   publisherKind = "undefined"
+	Unique      publisherKind = "unique"
+	HeadQuarter publisherKind = "headquarter"
+	Branch      publisherKind = "branch"
 )
 
+func (pk publisherKind) acceptStoryReader()bool{
+	if pk == HeadQuarter || pk == Unique || pk == Branch {
+		return true
+	}
+	return false
+}
+
+func (pk publisherKind) acceptStoryWriter()bool{
+	if pk == HeadQuarter || pk == Unique {
+		return true
+	}
+	return false
+}
+
 func Start(c Config) (*publisher, chan apiStatus) {
-	chPlace, chStatus := deployPlace(c)
-	publisher := new(publisher)
+	publisher, chStatus := deployPublisher(c)
+
+	// replication state control
+	//go func() {
+	//	for {
+	//		pubKind := <- stateControl()
+	//	}
+	//}()
+
+	// reader controller
 	go func() {
 		chStatus <- apiStatus{Err: nil, IsReady: true}
-		publisher = <- chPlace
+
 		for {
 			conn, err := publisher.listener.Accept()
 
