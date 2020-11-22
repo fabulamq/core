@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/fabulamq/core/internal/infra/log"
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	"net"
 )
 
@@ -30,7 +30,7 @@ func newStoryWriter(ctx context.Context, conn net.Conn, c *publisher) *storyWrit
 }
 
 func (sw storyWriter) listen() error {
-	log.Info(sw.ctx, "storyWriter.Listen")
+	log.Info(fmt.Sprintf("(%s) storyWriter.Listen id=%s", sw.publisher.ID, sw.ID))
 	write(sw.conn, []byte("ok"))
 	for {
 		select {
@@ -61,7 +61,7 @@ func (sw storyWriter) listen() error {
 				return err
 			}
 			sw.publisher.locker.Unlock()
-			log.Info(sw.ctx, fmt.Sprintf("storyWriter.Listen.SendedOK: [%s]", producerMsg))
+			log.Info(fmt.Sprintf("storyWriter.Listen.SendedOK: [%s]", producerMsg))
 		}
 	}
 }

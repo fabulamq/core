@@ -24,7 +24,7 @@ func main(){
 	}
 
 
-	_, status := api.Start(api.Config{
+	api := api.Start(api.Config{
 		Folder: *path,
 		Port:  *port,
 		Hosts: hosts,
@@ -33,7 +33,7 @@ func main(){
 	})
 	L: for {
 		select{
-		case s := <- status:
+		case s := <- api.Status:
 			if s.IsReady {
 				fmt.Println(fmt.Sprintf("Ready for reading your book at port %s", *port))
 			}

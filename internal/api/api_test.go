@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"strings"
 	"sync"
@@ -37,6 +38,10 @@ func getPathS3() string {
 }
 
 func setup() {
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: false,
+		ForceColors: true,
+	})
 	os.RemoveAll(getPath() + "/")
 	os.Mkdir(getPath(), os.ModePerm)
 	os.Mkdir(getPath() + "/sub1", os.ModePerm)
@@ -262,12 +267,17 @@ func TestMultipleReplicas(t *testing.T) {
 
 	go func() {
 		for {
-			time.Sleep(2 * time.Second)
 			p, err := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9990","localhost:9991","localhost:9992"}})
 			if err != nil {
 				continue
 			}
-			_, err = p.Write("topic-1", generator.NewFooBar())
+			for {
+				time.Sleep(2 * time.Second)
+				_, err = p.Write("topic-1", generator.NewFooBar())
+				if err != nil {
+					break
+				}
+			}
 		}
 	}()
 

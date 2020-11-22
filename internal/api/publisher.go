@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/fabulamq/core/internal/infra/log"
+	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
 	"strings"
@@ -59,7 +59,7 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyReaderMap.Store(storyReader.ID, storyReader)
 			err := storyReader.Listen(conn)
 			publisher.storyReaderMap.Delete(storyReader.ID)
-			log.Warn(storyReader.ctx, "storyReader.error", err)
+			log.Warn("storyReader.error", err)
 		case "sw":
 			if !publisher.acceptStoryWriter() {
 				break
@@ -68,7 +68,7 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyWriterMap.Store(storyWriter.ID, storyWriter)
 			err := storyWriter.listen()
 			publisher.storyWriterMap.Delete(storyWriter.ID)
-			log.Warn(storyWriter.ctx, "storyWriter.error", err)
+			log.Warn(fmt.Sprintf("storyWriter.error: %s", err.Error()))
 		case "branch":
 			if !publisher.acceptBranch() {
 				break
@@ -79,9 +79,9 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			err := branch.Listen(conn)
 			publisher.branchMap.Delete(branch.ID)
 			publisher.looseBranch <- true
-			log.Warn(branch.ctx, "branch.error", err)
-		case "info":
-			log.Info(ctx, fmt.Sprintf("(%s) sending info", publisher.ID))
+			log.Warn(fmt.Sprintf("branch.error: %s", err.Error()))
+			case "info":
+			log.Info(fmt.Sprintf("(%s) sending info", publisher.ID))
 			conn.Write([]byte(fmt.Sprintf("%s;%s;%d;%d;%d;%s\n",
 				Undefined,
 				publisher.ID,
@@ -100,20 +100,20 @@ func (publisher *publisher) reset() {
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
 	publisher.storyReaderMap.Range(func(key, value interface{}) bool {
-		consumer := value.(*storyReader)
-		log.Info(consumer.ctx, "reset.storyReaderMap")
-		consumer.cancel()
+		storyReader := value.(*storyReader)
+		log.Info(fmt.Sprintf("(%s) reset.storyReaderMap on ID=%s", publisher.ID, storyReader.ID))
+		storyReader.cancel()
 		return true
 	})
 	publisher.branchMap.Range(func(key, value interface{}) bool {
 		branch := value.(*branch)
-		log.Info(branch.ctx, "reset.branchMap")
+		log.Info(fmt.Sprintf("(%s) reset.branchMap on ID=%s", publisher.ID, branch.ID))
 		branch.cancel()
 		return true
 	})
 	publisher.storyWriterMap.Range(func(key, value interface{}) bool {
 		storyWriter := value.(*storyWriter)
-		log.Info(storyWriter.ctx, "reset.storyWriterMap")
+		log.Info(fmt.Sprintf("(%s) reset.storyWriterMap on ID=%s", publisher.ID, storyWriter.ID))
 		storyWriter.cancel()
 		return true
 	})
@@ -202,7 +202,7 @@ func (publisher *publisher) quo() float32 {
 func (publisher *publisher) electionController() {
 	ctx := context.Background()
 	go func() {
-		log.Info(ctx, fmt.Sprintf("(%s) starting election", publisher.ID))
+		log.Info(fmt.Sprintf("(%s) starting election", publisher.ID))
 		for {
 			totalInstances := len(publisher.Hosts) + 1
 
@@ -210,18 +210,18 @@ func (publisher *publisher) electionController() {
 
 			quo := float32(len(hostsInfo)) / float32(totalInstances)
 			if quo <= 0.5 {
-				log.Info(ctx, fmt.Sprintf("(%s) cannot elect by quo", publisher.ID))
+				log.Info(fmt.Sprintf("(%s) cannot elect by quo", publisher.ID))
 				time.Sleep(1 * time.Second)
 				continue
 			}
 			// check map status
 			hostInfo := hostsInfo.getTheOne()
-			log.Info(ctx, fmt.Sprintf("(%s) selected publisher: %s", publisher.ID, hostInfo.id))
+			log.Info(fmt.Sprintf("(%s) selected publisher: %s", publisher.ID, hostInfo.id))
 			if hostInfo.host == "local" {
 				publisher.startHeadQuarter(ctx)
 			}else {
 				err := publisher.startBranch(ctx, hostInfo.host)
-				log.Error(ctx, fmt.Sprintf("(%s) error on branch start", publisher.ID), err)
+				log.Warn(fmt.Sprintf("(%s) error on branch start: %s", publisher.ID, err.Error()))
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -240,7 +240,7 @@ func (publisher *publisher) getHostsInfo() hostsInfo {
 	}
 
 	for _, host := range publisher.Hosts {
-		log.Info(context.Background(), fmt.Sprintf("(%s) dialing to host: %s", publisher.ID, host))
+		log.Info(fmt.Sprintf("(%s) dialing to host: %s", publisher.ID, host))
 		conn, err := net.DialTimeout("tcp", host, time.Millisecond * 200)
 		if err != nil {
 			continue
@@ -289,7 +289,7 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 		IsReady: true,
 		kind:    Branch,
 	}
-	log.Info(ctx, fmt.Sprintf("(%s) start branch", publisher.ID))
+	log.Info(fmt.Sprintf("(%s) start branch", publisher.ID))
 	publisher.setPublisherKind(Branch)
 	conn, err := net.DialTimeout("tcp", hqUrl, time.Millisecond * 200)
 	if err != nil {
@@ -311,7 +311,7 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 		if txtSpl[0] != "msg" {
 			continue
 		}
-		log.Info(ctx, fmt.Sprintf("get message (%s): %s", publisher.ID, txtSpl))
+		log.Info(fmt.Sprintf("get message (%s): %s", publisher.ID, txtSpl))
 
 		mark, err := publisher.book.Write([]byte(fmt.Sprintf("%s",txtSpl[2])))
 		if err != nil {
@@ -324,7 +324,7 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 
 
 func (publisher *publisher) startHeadQuarter(ctx context.Context) {
-	log.Info(ctx, fmt.Sprintf("(%s) trying to stabilish a head quarter", publisher.ID))
+	log.Info(fmt.Sprintf("(%s) trying to stabilish a head quarter", publisher.ID))
 	publisher.setPublisherKind(FundHeadQuarter)
 
 	L: for {
@@ -334,10 +334,10 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 				continue
 			}
 			// finish
-			log.Info(ctx, fmt.Sprintf("(%s) timeout to stabilish a head quarter", publisher.ID))
+			log.Warn(fmt.Sprintf("(%s) timeout to stabilish a head quarter", publisher.ID))
 			break L
 		case <- publisher.looseBranch:
-			log.Info(ctx, fmt.Sprintf("(%s) loose all branches, minory", publisher.ID))
+			log.Info(fmt.Sprintf("(%s) loose all branches, minory", publisher.ID))
 			if publisher.quo() <= 0.5 {
 				break L
 			}
@@ -345,11 +345,11 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 			if publisher.publisherKind == HeadQuarter {
 				continue
 			}
-			log.Info(ctx, fmt.Sprintf("(%s) new branch on HQ, current quo=%v", publisher.ID, publisher.quo()))
+			log.Info(fmt.Sprintf("(%s) new branch on HQ, current quo=%v", publisher.ID, publisher.quo()))
 			if publisher.quo() <= 0.5 {
 				continue
 			}
-			log.Info(ctx, fmt.Sprintf("(%s) start a new head quarter", publisher.ID))
+			log.Info(fmt.Sprintf("(%s) start a new head quarter", publisher.ID))
 			publisher.Status <- apiStatus{
 				IsReady:      true,
 				kind:         HeadQuarter,
@@ -357,12 +357,12 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 			}
 			publisher.setPublisherKind(HeadQuarter)
 		case <- publisher.promoteElection:
-			log.Info(ctx, fmt.Sprintf("(%s) promote new election", publisher.ID))
+			log.Info(fmt.Sprintf("(%s) promote new election", publisher.ID))
 			// promote new election
 			break L
 		}
 	}
-	log.Info(ctx, fmt.Sprintf("(%s) reset all headquarter", publisher.ID))
+	log.Warn(fmt.Sprintf("(%s) reset all headquarter", publisher.ID))
 	publisher.reset()
 }
 

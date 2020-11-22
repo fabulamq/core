@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
-	"github.com/fabulamq/core/internal/infra/log"
+	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
 )
@@ -50,7 +50,7 @@ func (br *branch) Stop() {
 }
 
 func (br *branch) Listen(conn net.Conn) error {
-	log.Info(br.ctx, "branch.Listen")
+	log.Info("branch.Listen")
 
 	err := write(conn, []byte("ok"))
 	if err != nil {
@@ -71,7 +71,7 @@ func (br *branch) Listen(conn net.Conn) error {
 				return fmt.Errorf("done ctx")
 			case line := <-tailLine:
 				msg := []byte(fmt.Sprintf("%d;%d;%s", br.mark.getChapter(), br.mark.getLine(), line.Text))
-				log.Info(br.ctx, fmt.Sprintf("(%s) branch.Listen.readLine: [%s]", br.ID, msg))
+				log.Info(fmt.Sprintf("(%s) branch.Listen.readLine: [%s]", br.ID, msg))
 				if err != nil {
 					return err
 				}
@@ -93,13 +93,13 @@ func (br *branch) Listen(conn net.Conn) error {
 
 				br.mark.addLine()
 				if br.mark.getLine() == br.controller.book.maxLinesPerChapter {
-					log.Info(br.ctx, fmt.Sprintf("branch.Listen.newChapter(%s)", br.ID))
+					log.Info(fmt.Sprintf("branch.Listen.newChapter(%s)", br.ID))
 					br.mark.resetLine()
 					br.mark.addChapter()
 					breakChapter = true
 				}
 
-				log.Info(br.ctx, fmt.Sprintf("branch.Listen.completed(%s): [%s]", br.ID, msg))
+				log.Info(fmt.Sprintf("branch.Listen.completed(%s): [%s]", br.ID, msg))
 
 				if breakChapter {
 					break Chapter
