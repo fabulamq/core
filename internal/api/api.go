@@ -6,62 +6,37 @@ import (
 )
 
 type apiStatus struct {
-	Err     error
-	IsReady bool
-	kind    publisherKind
+	Err          error
+	IsReady      bool
+	kind         publisherKind
+	AcceptWriter bool
 }
 
-type publisherKind string
+func Start(c Config) *publisher {
+	publisher := deployPublisher(c)
 
-const (
-	Undefined   publisherKind = "undefined"
-	Unique      publisherKind = "unique"
-	HeadQuarter publisherKind = "headquarter"
-	Branch      publisherKind = "branch"
-)
-
-func (pk publisherKind) acceptStoryReader()bool{
-	if pk == HeadQuarter || pk == Unique || pk == Branch {
-		return true
+	if publisher.publisherKind == Undefined {
+		publisher.electionController()
 	}
-	return false
-}
-
-func (pk publisherKind) acceptStoryWriter()bool{
-	if pk == HeadQuarter || pk == Unique {
-		return true
-	}
-	return false
-}
-
-func Start(c Config) (*publisher, chan apiStatus) {
-	publisher, chStatus := deployPublisher(c)
-
-	// replication state control
-	//go func() {
-	//	for {
-	//		pubKind := <- stateControl()
-	//	}
-	//}()
 
 	// reader controller
 	go func() {
-		chStatus <- apiStatus{Err: nil, IsReady: true}
-
+		publisher.Status <- apiStatus{Err: nil, IsReady: true}
 		for {
 			conn, err := publisher.listener.Accept()
 
 			if err != nil {
-				chStatus <- apiStatus{Err: err, IsReady: false}
+				publisher.Status <- apiStatus{Err: err, IsReady: false}
 			}
 			publisher.acceptConn(conn)
 		}
 	}()
 
-	return publisher, chStatus
+	return publisher
 }
 
 type Config struct {
+	ID               string
 	Port             string
 	Weight           int
 	Hosts            []string

@@ -1,26 +1,37 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"github.com/fabulamq/core/internal/infra/log"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type publisher struct {
+	ID            string
+	Status        chan apiStatus
 	publisherKind publisherKind
+	HqUrl         string
 
-	locker sync.Mutex
-	book   *book
-	weight int
+	locker   sync.Mutex
+	book     *book
+	weight   int
 	listener net.Listener
 	// general locker
 
 	storyReaderMap  sync.Map
 	storyWriterMap  sync.Map
-	storyAuditorMap sync.Map
+	branchMap       sync.Map
+	Hosts           []string
+
+	looseBranch     chan bool
+	gainBranch      chan bool
+	promoteElection chan bool
 }
 
 
@@ -41,7 +52,7 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 
 		switch lineSpl[0] {
 		case "sr":
-			if !publisher.publisherKind.acceptStoryReader() {
+			if !publisher.acceptStoryReader() {
 				break
 			}
 			storyReader := newStoryReader(ctx, lineSpl, publisher)
@@ -50,29 +61,60 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyReaderMap.Delete(storyReader.ID)
 			log.Warn(storyReader.ctx, "storyReader.error", err)
 		case "sw":
+			if !publisher.acceptStoryWriter() {
+				break
+			}
 			storyWriter := newStoryWriter(ctx, conn, publisher)
+			publisher.storyWriterMap.Store(storyWriter.ID, storyWriter)
 			err := storyWriter.listen()
-			storyWriter.afterStop(err)
-		case "r":
-			// same logic as storyReader
+			publisher.storyWriterMap.Delete(storyWriter.ID)
+			log.Warn(storyWriter.ctx, "storyWriter.error", err)
+		case "branch":
+			if !publisher.acceptBranch() {
+				break
+			}
+			publisher.gainBranch <- true
+			branch := newBranch(ctx, lineSpl, publisher)
+			publisher.branchMap.Store(branch.ID, branch)
+			err := branch.Listen(conn)
+			publisher.branchMap.Delete(branch.ID)
+			publisher.looseBranch <- true
+			log.Warn(branch.ctx, "branch.error", err)
 		case "info":
-			conn.Write([]byte(fmt.Sprintf("%d;%d;%d\n", publisher.weight, publisher.book.mark.getChapter(), publisher.book.mark.getLine())))
+			log.Info(ctx, fmt.Sprintf("(%s) sending info", publisher.ID))
+			conn.Write([]byte(fmt.Sprintf("%s;%s;%d;%d;%d;%s\n",
+				Undefined,
+				publisher.ID,
+				publisher.weight,
+				publisher.book.mark.getChapter(),
+				publisher.book.mark.getLine(),
+				publisher.publisherKind,
+			)))
 		}
 		conn.Close()
 	}()
 }
 
 func (publisher *publisher) reset() {
+	publisher.setPublisherKind(Undefined)
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
 	publisher.storyReaderMap.Range(func(key, value interface{}) bool {
 		consumer := value.(*storyReader)
+		log.Info(consumer.ctx, "reset.storyReaderMap")
 		consumer.cancel()
-		publisher.storyReaderMap.Delete(key)
+		return true
+	})
+	publisher.branchMap.Range(func(key, value interface{}) bool {
+		branch := value.(*branch)
+		log.Info(branch.ctx, "reset.branchMap")
+		branch.cancel()
 		return true
 	})
 	publisher.storyWriterMap.Range(func(key, value interface{}) bool {
-		prod := value.(*storyWriter)
-		publisher.storyWriterMap.Delete(key)
-		prod.Stop()
+		storyWriter := value.(*storyWriter)
+		log.Info(storyWriter.ctx, "reset.storyWriterMap")
+		storyWriter.cancel()
 		return true
 	})
 }
@@ -80,4 +122,252 @@ func (publisher *publisher) reset() {
 func (publisher *publisher) Stop() {
 	publisher.reset()
 	publisher.listener.Close()
+}
+
+func (publisher *publisher) acceptStoryReader()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == Unique || publisher.publisherKind == Branch {
+		return true
+	}
+	if publisher.publisherKind == HeadQuarter && publisher.quo() > 0.5 {
+		return true
+	}
+	return false
+}
+
+func (publisher *publisher) isUndefined()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == Undefined {
+		return true
+	}
+	return false
+}
+
+func (publisher *publisher) isHeadQuarter()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == HeadQuarter {
+		return true
+	}
+	return false
+}
+
+func (publisher *publisher) isFundingAHeadQuarter()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == FundHeadQuarter {
+		return true
+	}
+	return false
+}
+
+func (publisher *publisher) acceptStoryWriter()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == HeadQuarter || publisher.publisherKind == Unique {
+		return true
+	}
+	return false
+}
+
+func (publisher *publisher) acceptBranch()bool{
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	if publisher.publisherKind == HeadQuarter || publisher.publisherKind == FundHeadQuarter {
+		return true
+	}
+	return false
+}
+
+
+func (publisher *publisher) setPublisherKind(pk publisherKind){
+	publisher.locker.Lock()
+	defer publisher.locker.Unlock()
+	publisher.publisherKind = pk
+}
+
+func (publisher *publisher) quo() float32 {
+	totalInstances := len(publisher.Hosts) + 1
+
+	totalActiveBranch := 1
+	publisher.branchMap.Range(func(key, value interface{}) bool {
+		totalActiveBranch++
+		return true
+	})
+	return float32(totalActiveBranch) / float32(totalInstances)
+}
+
+func (publisher *publisher) electionController() {
+	ctx := context.Background()
+	go func() {
+		log.Info(ctx, fmt.Sprintf("(%s) starting election", publisher.ID))
+		for {
+			totalInstances := len(publisher.Hosts) + 1
+
+			hostsInfo := publisher.getHostsInfo()
+
+			quo := float32(len(hostsInfo)) / float32(totalInstances)
+			if quo <= 0.5 {
+				log.Info(ctx, fmt.Sprintf("(%s) cannot elect by quo", publisher.ID))
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			// check map status
+			hostInfo := hostsInfo.getTheOne()
+			log.Info(ctx, fmt.Sprintf("(%s) selected publisher: %s", publisher.ID, hostInfo.id))
+			if hostInfo.host == "local" {
+				publisher.startHeadQuarter(ctx)
+			}else {
+				err := publisher.startBranch(ctx, hostInfo.host)
+				log.Error(ctx, fmt.Sprintf("(%s) error on branch start", publisher.ID), err)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+}
+
+func (publisher *publisher) getHostsInfo() hostsInfo {
+	hostsInfo := make(hostsInfo, 0)
+
+	hostsInfo["local"] = hostInfo{
+		id:     publisher.ID,
+		host:   "local",
+		weight: publisher.weight,
+		mark:   publisher.book.mark,
+		kind:   Undefined,
+	}
+
+	for _, host := range publisher.Hosts {
+		log.Info(context.Background(), fmt.Sprintf("(%s) dialing to host: %s", publisher.ID, host))
+		conn, err := net.DialTimeout("tcp", host, time.Millisecond * 200)
+		if err != nil {
+			continue
+		}
+		_, err = conn.Write([]byte("info\n"))
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(conn)
+		scanner.Split(bufio.ScanLines)
+
+		if scanner.Scan() {
+			txtSpl := strings.Split(scanner.Text(), ";")
+
+			id := txtSpl[1]
+			weight, err := strconv.Atoi(txtSpl[2])
+			if err != nil {
+				continue
+			}
+			chapter, err := strconv.ParseUint(txtSpl[3], 10, 64)
+			if err != nil {
+				continue
+			}
+			line, err := strconv.ParseUint(txtSpl[4], 10, 64)
+			if err != nil {
+				continue
+			}
+			hostsInfo[host] = hostInfo{
+				id:     id,
+				kind:   GetPublisherKind(txtSpl[5]),
+				host:   host,
+				weight: weight,
+				mark: &mark{
+					chapter: chapter,
+					line:    line,
+				},
+			}
+		}
+	}
+	return hostsInfo
+}
+
+func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error {
+	publisher.Status <- apiStatus{
+		Err:     nil,
+		IsReady: true,
+		kind:    Branch,
+	}
+	log.Info(ctx, fmt.Sprintf("(%s) start branch", publisher.ID))
+	publisher.setPublisherKind(Branch)
+	conn, err := net.DialTimeout("tcp", hqUrl, time.Millisecond * 200)
+	if err != nil {
+		return err
+	}
+	_, err = conn.Write([]byte(fmt.Sprintf("branch;%s;%d;%d\n", publisher.ID, publisher.book.mark.chapter, publisher.book.mark.line)))
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(conn)
+	scanner.Split(bufio.ScanLines)
+
+	for {
+		scanner.Scan()
+		if scanner.Text() == ""{
+			return fmt.Errorf("connection closed")
+		}
+		txtSpl := strings.Split(scanner.Text(), ";")
+		if txtSpl[0] != "msg" {
+			continue
+		}
+		log.Info(ctx, fmt.Sprintf("get message (%s): %s", publisher.ID, txtSpl))
+
+		mark, err := publisher.book.Write([]byte(fmt.Sprintf("%s",txtSpl[2])))
+		if err != nil {
+			return err
+		}
+		publisher.book.mark = mark
+	}
+	return nil
+}
+
+
+func (publisher *publisher) startHeadQuarter(ctx context.Context) {
+	log.Info(ctx, fmt.Sprintf("(%s) trying to stabilish a head quarter", publisher.ID))
+	publisher.setPublisherKind(FundHeadQuarter)
+
+	L: for {
+		select {
+		case <-time.After(5 * time.Second):
+			if publisher.publisherKind == HeadQuarter {
+				continue
+			}
+			// finish
+			log.Info(ctx, fmt.Sprintf("(%s) timeout to stabilish a head quarter", publisher.ID))
+			break L
+		case <- publisher.looseBranch:
+			log.Info(ctx, fmt.Sprintf("(%s) loose all branches, minory", publisher.ID))
+			if publisher.quo() <= 0.5 {
+				break L
+			}
+		case <- publisher.gainBranch:
+			if publisher.publisherKind == HeadQuarter {
+				continue
+			}
+			log.Info(ctx, fmt.Sprintf("(%s) new branch on HQ, current quo=%v", publisher.ID, publisher.quo()))
+			if publisher.quo() <= 0.5 {
+				continue
+			}
+			log.Info(ctx, fmt.Sprintf("(%s) start a new head quarter", publisher.ID))
+			publisher.Status <- apiStatus{
+				IsReady:      true,
+				kind:         HeadQuarter,
+				AcceptWriter: true,
+			}
+			publisher.setPublisherKind(HeadQuarter)
+		case <- publisher.promoteElection:
+			log.Info(ctx, fmt.Sprintf("(%s) promote new election", publisher.ID))
+			// promote new election
+			break L
+		}
+	}
+	log.Info(ctx, fmt.Sprintf("(%s) reset all headquarter", publisher.ID))
+	publisher.reset()
+}
+
+func (publisher *publisher) PromoteElection() {
+	if publisher.isHeadQuarter() {
+		publisher.promoteElection <- true
+	}
 }

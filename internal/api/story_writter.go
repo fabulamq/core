@@ -9,22 +9,26 @@ import (
 )
 
 type storyWriter struct {
+	ID        string
 	conn      net.Conn
 	ctx       context.Context
 	cancel    func()
 	hasFinish chan bool
-	*publisher
+	publisher *publisher
 }
 
-func newStoryWriter(ctx context.Context, conn net.Conn, c *publisher) storyWriter {
+func newStoryWriter(ctx context.Context, conn net.Conn, c *publisher) *storyWriter {
 	withCancel, cancel := context.WithCancel(ctx)
-	return storyWriter{conn: conn, publisher: c, ctx: withCancel, cancel: cancel, hasFinish: make(chan bool)}
+	return &storyWriter{
+		conn: conn,
+		ID: uuid.New().String(),
+		publisher: c,
+		ctx: withCancel,
+		cancel: cancel,
+		hasFinish: make(chan bool),
+	}
 }
 
-func (sw storyWriter) Stop() {
-	sw.cancel()
-	<-sw.hasFinish
-}
 func (sw storyWriter) listen() error {
 	log.Info(sw.ctx, "storyWriter.Listen")
 	write(sw.conn, []byte("ok"))
@@ -37,35 +41,27 @@ func (sw storyWriter) listen() error {
 			if res.err != nil {
 				return res.err
 			}
-			sw.locker.Lock()
+			sw.publisher.locker.Lock()
 
 			if len(producerMsg) == 0 {
+				sw.publisher.locker.Unlock()
 				return fmt.Errorf("nil message")
 			}
 
 			// perform save here "topic:msg"
-			chapter, line, err := sw.book.Write(producerMsg)
+			mark, err := sw.publisher.book.Write(producerMsg)
 			if err != nil {
+				sw.publisher.locker.Unlock()
 				return err
 			}
 
-			err = write(sw.conn, []byte(fmt.Sprintf("ok;%d;%d", chapter, line)))
+			err = write(sw.conn, []byte(fmt.Sprintf("ok;%d;%d", mark.getChapter(), mark.getLine())))
 			if err != nil {
+				sw.publisher.locker.Unlock()
 				return err
 			}
-			sw.locker.Unlock()
+			sw.publisher.locker.Unlock()
 			log.Info(sw.ctx, fmt.Sprintf("storyWriter.Listen.SendedOK: [%s]", producerMsg))
 		}
 	}
-}
-
-func (sw *storyWriter) store() {
-	sw.locker.Lock()
-	sw.storyWriterMap.Store(uuid.New().String(), sw)
-	sw.locker.Unlock()
-}
-
-func (sw storyWriter) afterStop(err error) {
-	sw.locker.Unlock()
-	log.Warn(sw.ctx, "storyWriter.Listen.Err", err)
 }

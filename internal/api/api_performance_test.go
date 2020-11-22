@@ -14,7 +14,7 @@ func TestWritePerformance(t *testing.T) {
 	//c.book.maxLinesPerChapter = uint64(100000)
 
 	total := 0.0
-	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
+	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
 	go func() {
 		for  {
 			_, err := p.Write("topic-1", fmt.Sprintf("%s%s", uuid.New().String(), uuid.New().String()))

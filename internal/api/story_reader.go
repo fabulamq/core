@@ -75,7 +75,7 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <-tailLine:
-				msg := []byte(fmt.Sprintf("%d;%d;%t;%s", sr.mark.getChapter(), sr.mark.getLine(), sr.mark.isBefore(sr.breakEvenMark), line.Text))
+				msg := []byte(fmt.Sprintf("msg;%d;%d;%t;%s", sr.mark.getChapter(), sr.mark.getLine(), sr.mark.isBefore(sr.breakEvenMark), line.Text))
 				log.Info(sr.ctx, fmt.Sprintf("storyReader.Listen.readLine(%s): [%s]",sr.ID, msg))
 				if err != nil {
 					return err

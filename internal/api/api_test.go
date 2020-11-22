@@ -21,9 +21,27 @@ func getPath() string {
 	return strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data"
 }
 
+func getPathS1() string {
+	dir, _ := os.Getwd()
+	return strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data/sub1"
+}
+
+func getPathS2() string {
+	dir, _ := os.Getwd()
+	return strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data/sub2"
+}
+
+func getPathS3() string {
+	dir, _ := os.Getwd()
+	return strings.Split(dir, "/fabulamq")[0] + "/fabulamq/.data/sub3"
+}
+
 func setup() {
 	os.RemoveAll(getPath() + "/")
 	os.Mkdir(getPath(), os.ModePerm)
+	os.Mkdir(getPath() + "/sub1", os.ModePerm)
+	os.Mkdir(getPath() + "/sub2", os.ModePerm)
+	os.Mkdir(getPath() + "/sub3", os.ModePerm)
 }
 
 var consumerOffset sync.Map
@@ -36,14 +54,14 @@ func TestMain(m *testing.M) {
 
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestDifferentChannelConsumers(t *testing.T) {
-	_, status := Start(Config{
+	api := Start(Config{
 		Folder:           getPath(),
 		OffsetPerChapter: 50,
 	})
-	<-status
+	<- api.Status
 
 	{
-		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
 		go func() {
 			for i := 0; i < 200; i++ {
 				if i == 105 {
@@ -59,9 +77,10 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	lastMsg := make(chan bool)
 
 	go func() { // 160 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 3 {
+				fmt.Println("error on ID 1")
 				return fmt.Errorf("error on ID 1")
 			}
 			totalMsgConsumed <- "ch_1"
@@ -70,7 +89,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		lastMsg <- true
 	}()
 	go func() { // 50 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 0 && tail.Chapter == 1 {
 				fmt.Println("error on ID 2")
@@ -84,7 +103,8 @@ func TestDifferentChannelConsumers(t *testing.T) {
 
 	go func() { // wait, 105 lines
 		time.Sleep(1 * time.Second)
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader, err := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		assert.NoError(t, err)
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 5 && tail.Chapter == 2 {
 				fmt.Println("error on ID 3")
@@ -97,7 +117,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	}()
 
 	go func() { // only read 5 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "4", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "4", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Hosts: []string{"localhost:9998"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 2 {
 				assert.Equal(t, "msg_105", tail.Message)
@@ -132,14 +152,14 @@ L:
 
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestReadingFlow(t *testing.T) {
-	_, status := Start(Config{
+	api := Start(Config{
 		Folder:           getPath(),
 		OffsetPerChapter: 10,
 	})
-	<-status
+	<- api.Status
 
 	{
-		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
 		go func() {
 			for i := 0; i < 400; i++ {
 				time.Sleep(10 * time.Millisecond)
@@ -152,7 +172,7 @@ func TestReadingFlow(t *testing.T) {
 	hasEnd := make(chan bool)
 
 	go func() {
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			fmt.Println("read here 1: ", tail.Chapter, tail.Line)
 			if tail.Line == 5 && tail.Chapter == 38 {
@@ -168,13 +188,13 @@ func TestReadingFlow(t *testing.T) {
 }
 
 func TestReviewFunction(t *testing.T) {
-	_, status := Start(Config{
+	api := Start(Config{
 		Folder:           getPath(),
 		OffsetPerChapter: 50,
 	})
-	<-status
+	<- api.Status
 
-	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Host: "localhost:9998"})
+	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
 	for i := 0; i < 5; i++ {
 		if i == 105 {
 			p.Write("topic-1", "msg_105")
@@ -186,7 +206,7 @@ func TestReviewFunction(t *testing.T) {
 	steps := make(chan bool)
 
 	go func() {
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Host: "localhost:9998"})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 4 {
 				steps <- true
@@ -204,39 +224,67 @@ func TestReviewFunction(t *testing.T) {
 
 }
 
+// go test -v ./... -p 1 -count=1 -run TestMultipleReplicas -failfast -race
 func TestMultipleReplicas(t *testing.T) {
-	_, s1 := Start(Config{
-		Folder:           getPath(),
+	p1 := Start(Config{
+		ID:               "1",
 		Port:             "9990",
-		Hosts:            []string{"localhost:9991", "localhost:9992"},
-		OffsetPerChapter: 10,
 		Weight:           100,
+		Hosts:            []string{"localhost:9991", "localhost:9992"},
+		Folder:           getPathS1(),
+		OffsetPerChapter: 10,
 	})
-
-	_, s2 := Start(Config{
-		Folder:           getPath(),
+	p2 := Start(Config{
+		ID:               "2",
 		Port:             "9991",
-		Hosts:            []string{"localhost:9990", "localhost:9992"},
-		OffsetPerChapter: 10,
 		Weight:           90,
+		Hosts:            []string{"localhost:9990", "localhost:9992"},
+		Folder:           getPathS2(),
+		OffsetPerChapter: 10,
 	})
 
-	_, s3 := Start(Config{
-		Folder:           getPath(),
+	p3 := Start(Config{
+		ID:               "3",
 		Port:             "9992",
-		Hosts:            []string{"localhost:9990", "localhost:9991"},
-		OffsetPerChapter: 10,
 		Weight:           80,
+		Hosts:            []string{"localhost:9990", "localhost:9991"},
+		Folder:           getPathS3(),
+		OffsetPerChapter: 10,
 	})
+
+	forceElection := func(p *publisher) {
+		go func() {
+			time.Sleep(5 * time.Second)
+			p.PromoteElection()
+		}()
+	}
+
+
+	go func() {
+		for {
+			time.Sleep(2 * time.Second)
+			p, err := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9990","localhost:9991","localhost:9992"}})
+			if err != nil {
+				continue
+			}
+			_, err = p.Write("topic-1", generator.NewFooBar())
+		}
+	}()
+
 
 	for {
 		select {
-		case status := <-s1:
-			fmt.Println(status)
-		case status := <-s2:
-			fmt.Println(status)
-		case status := <-s3:
-			fmt.Println(status)
+		case status := <-p1.Status:
+			if status.kind == HeadQuarter {
+				forceElection(p1)
+			}
+		case status := <-p2.Status:
+			if status.kind == HeadQuarter {
+				forceElection(p2)
+			}
+		case <-p3.Status:
 		}
-	}
+}
+
+
 }

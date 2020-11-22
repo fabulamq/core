@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 type book struct {
@@ -20,45 +19,6 @@ type book struct {
 	//
 	maxLinesPerChapter uint64
 	Folder             string
-}
-
-type mark struct {
-	chapter uint64
-	line    uint64
-}
-
-func (m *mark) addLine() {
-	atomic.AddUint64(&m.line, 1)
-}
-
-func (m *mark) addChapter() {
-	atomic.AddUint64(&m.chapter, 1)
-}
-
-func (m *mark) resetLine() {
-	atomic.AddUint64(&m.line, -m.line)
-}
-
-func (m *mark) getLine() uint64 {
-	return atomic.LoadUint64(&m.line)
-}
-
-func (m *mark) getChapter() uint64 {
-	return atomic.LoadUint64(&m.chapter)
-}
-
-func (m *mark) isBefore(otherMark mark) bool {
-	if m.chapter >= otherMark.chapter && m.line >= otherMark.line {
-		return false
-	}
-	return true
-}
-
-func (m *mark) isEqual(otherMark mark) bool {
-	if m.chapter == otherMark.chapter && m.line == otherMark.line {
-		return true
-	}
-	return false
 }
 
 type bookConfig struct {
@@ -150,25 +110,25 @@ func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
 	return t.Lines, nil
 }
 
-func (b *book) Write(bs []byte) (uint64, uint64, error) {
+func (b *book) Write(bs []byte) (*mark, error) {
 	b.l.Lock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 	b.mark.addLine()
 	if b.mark.getLine() == b.maxLinesPerChapter {
 		err = b.chapter.Close()
 		if err != nil {
-			return 0, 0, err
+			return nil, err
 		}
 		b.mark.addChapter()
 		b.mark.resetLine()
 		err = b.newChapter(b.mark.getChapter())
 		if err != nil {
-			return 0, 0, err
+			return nil, err
 		}
 	}
 	b.l.Unlock()
-	return b.mark.getChapter(), b.mark.getLine(), nil
+	return b.mark, nil
 }
