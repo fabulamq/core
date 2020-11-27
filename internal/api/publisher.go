@@ -289,7 +289,7 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 		IsReady: true,
 		kind:    Branch,
 	}
-	log.Info(fmt.Sprintf("(%s) start branch", publisher.ID))
+	log.Info(fmt.Sprintf("(%s) startBranch", publisher.ID))
 	publisher.setPublisherKind(Branch)
 	conn, err := net.DialTimeout("tcp", hqUrl, time.Millisecond * 200)
 	if err != nil {
@@ -304,22 +304,27 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 
 	for {
 		scanner.Scan()
-		if scanner.Text() == ""{
+		txt := scanner.Text()
+		log.Info(fmt.Sprintf("startBranch.getMessage (%s): %s", publisher.ID, txt))
+		if txt == ""{
 			return fmt.Errorf("connection closed")
 		}
-		txtSpl := strings.Split(scanner.Text(), ";")
+		txtSpl := strings.Split(txt, ";")
 		if txtSpl[0] != "msg" {
 			continue
 		}
-		log.Info(fmt.Sprintf("get message (%s): %s", publisher.ID, txtSpl))
 
 		mark, err := publisher.book.Write([]byte(fmt.Sprintf("%s",txtSpl[2])))
 		if err != nil {
+			conn.Write([]byte("nok\n"))
 			return err
 		}
 		publisher.book.mark = mark
+		_, err = conn.Write([]byte("ok\n"))
+		if err != nil {
+			return err
+		}
 	}
-	return nil
 }
 
 

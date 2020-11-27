@@ -237,7 +237,7 @@ func TestMultipleReplicas(t *testing.T) {
 		Weight:           100,
 		Hosts:            []string{"localhost:9991", "localhost:9992"},
 		Folder:           getPathS1(),
-		OffsetPerChapter: 10,
+		OffsetPerChapter: 50,
 	})
 	p2 := Start(Config{
 		ID:               "2",
@@ -245,7 +245,7 @@ func TestMultipleReplicas(t *testing.T) {
 		Weight:           90,
 		Hosts:            []string{"localhost:9990", "localhost:9992"},
 		Folder:           getPathS2(),
-		OffsetPerChapter: 10,
+		OffsetPerChapter: 50,
 	})
 
 	p3 := Start(Config{
@@ -254,12 +254,12 @@ func TestMultipleReplicas(t *testing.T) {
 		Weight:           80,
 		Hosts:            []string{"localhost:9990", "localhost:9991"},
 		Folder:           getPathS3(),
-		OffsetPerChapter: 10,
+		OffsetPerChapter: 50,
 	})
 
 	forceElection := func(p *publisher) {
 		go func() {
-			time.Sleep(5 * time.Second)
+			time.Sleep(10 * time.Second)
 			p.PromoteElection()
 		}()
 	}

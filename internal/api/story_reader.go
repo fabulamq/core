@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
+	"time"
 )
 
 type storyReader struct {
@@ -21,8 +22,7 @@ type storyReader struct {
 }
 
 func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyReader {
-	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
-	withCancel, cancel := context.WithCancel(ctxWirtId)
+	withCancel, cancel := context.WithCancel(ctx)
 
 	chapter, _ := strconv.ParseUint(lineSpl[2], 10, 64)
 	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
@@ -85,29 +85,34 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 				if err != nil {
 					return err
 				}
-				chRes := readLine(conn)
-				res := <-chRes
-				if res.err != nil {
-					return err
-				}
-				if string(res.b) != "ok" {
-					return fmt.Errorf("NOK")
-				}
 
-				breakChapter := false
+				ctxTo, _ := context.WithTimeout(sr.ctx, time.Second * 3)
+				select {
+				case <- ctxTo.Done():
+					return fmt.Errorf("timeout ctx")
+				case res := <- readLine(conn):
+					if res.err != nil {
+						return err
+					}
+					if string(res.b) != "ok" {
+						return fmt.Errorf("NOK")
+					}
 
-				sr.mark.addLine()
-				if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
-					log.Info(fmt.Sprintf("storyReader.Listen.newChapter(%s)", sr.ID))
-					sr.mark.resetLine()
-					sr.mark.addChapter()
-					breakChapter = true
-				}
+					breakChapter := false
 
-				log.Info(fmt.Sprintf("storyReader.Listen.completed(%s): [%s]", sr.ID, msg))
+					sr.mark.addLine()
+					if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
+						log.Info(fmt.Sprintf("storyReader.Listen.newChapter(%s)", sr.ID))
+						sr.mark.resetLine()
+						sr.mark.addChapter()
+						breakChapter = true
+					}
 
-				if breakChapter {
-					break Chapter
+					log.Info(fmt.Sprintf("storyReader.Listen.completed(%s): [%s]", sr.ID, msg))
+
+					if breakChapter {
+						break Chapter
+					}
 				}
 			}
 		}

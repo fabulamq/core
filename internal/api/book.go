@@ -112,6 +112,7 @@ func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
 
 func (b *book) Write(bs []byte) (*mark, error) {
 	b.l.Lock()
+	defer b.l.Unlock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {
 		return nil, err
@@ -129,6 +130,9 @@ func (b *book) Write(bs []byte) (*mark, error) {
 			return nil, err
 		}
 	}
-	b.l.Unlock()
 	return b.mark, nil
+}
+
+func (b *book) Close(){
+	b.chapter.Close()
 }

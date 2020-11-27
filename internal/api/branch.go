@@ -6,6 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
+	"time"
 )
 
 type branch struct {
@@ -70,7 +71,7 @@ func (br *branch) Listen(conn net.Conn) error {
 			case <-br.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <-tailLine:
-				msg := []byte(fmt.Sprintf("%d;%d;%s", br.mark.getChapter(), br.mark.getLine(), line.Text))
+				msg := []byte(fmt.Sprintf("msg;%d;%d;%s", br.mark.getChapter(), br.mark.getLine(), line.Text))
 				log.Info(fmt.Sprintf("(%s) branch.Listen.readLine: [%s]", br.ID, msg))
 				if err != nil {
 					return err
@@ -80,29 +81,33 @@ func (br *branch) Listen(conn net.Conn) error {
 				if err != nil {
 					return err
 				}
-				chRes := readLine(conn)
-				res := <-chRes
-				if res.err != nil {
-					return err
-				}
-				if string(res.b) != "ok" {
-					return fmt.Errorf("NOK")
-				}
+				ctxTo, _ := context.WithTimeout(br.ctx, time.Second * 3)
+				select {
+				case <- ctxTo.Done():
+					return fmt.Errorf("timeout ctx")
+				case res := <- readLine(conn):
+					if res.err != nil {
+						return err
+					}
+					if string(res.b) != "ok" {
+						return fmt.Errorf("NOK")
+					}
 
-				breakChapter := false
+					breakChapter := false
 
-				br.mark.addLine()
-				if br.mark.getLine() == br.controller.book.maxLinesPerChapter {
-					log.Info(fmt.Sprintf("branch.Listen.newChapter(%s)", br.ID))
-					br.mark.resetLine()
-					br.mark.addChapter()
-					breakChapter = true
-				}
+					br.mark.addLine()
+					if br.mark.getLine() == br.controller.book.maxLinesPerChapter {
+						log.Info(fmt.Sprintf("branch.Listen.newChapter(%s)", br.ID))
+						br.mark.resetLine()
+						br.mark.addChapter()
+						breakChapter = true
+					}
 
-				log.Info(fmt.Sprintf("branch.Listen.completed(%s): [%s]", br.ID, msg))
+					log.Info(fmt.Sprintf("branch.Listen.completed(%s): [%s]", br.ID, msg))
 
-				if breakChapter {
-					break Chapter
+					if breakChapter {
+						break Chapter
+					}
 				}
 			}
 		}
