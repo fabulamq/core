@@ -259,7 +259,7 @@ func TestMultipleReplicas(t *testing.T) {
 
 	forceElection := func(p *publisher) {
 		go func() {
-			time.Sleep(10 * time.Second)
+			time.Sleep(2 * time.Second)
 			p.PromoteElection()
 		}()
 	}
@@ -272,7 +272,7 @@ func TestMultipleReplicas(t *testing.T) {
 				continue
 			}
 			for {
-				time.Sleep(2 * time.Second)
+				time.Sleep(1 * time.Second)
 				_, err = p.Write("topic-1", generator.NewFooBar())
 				if err != nil {
 					break

@@ -68,18 +68,19 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyWriterMap.Store(storyWriter.ID, storyWriter)
 			err := storyWriter.listen()
 			publisher.storyWriterMap.Delete(storyWriter.ID)
-			log.Warn(fmt.Sprintf("storyWriter.error: %s", err.Error()))
+			log.Warn(fmt.Sprintf("(%s) storyWriter.error: %s", publisher.ID ,err.Error()))
 		case "branch":
 			if !publisher.acceptBranch() {
 				break
 			}
-			publisher.gainBranch <- true
 			branch := newBranch(ctx, lineSpl, publisher)
 			publisher.branchMap.Store(branch.ID, branch)
 			err := branch.Listen(conn)
 			publisher.branchMap.Delete(branch.ID)
-			publisher.looseBranch <- true
-			log.Warn(fmt.Sprintf("branch.error: %s", err.Error()))
+			if publisher.isHeadQuarter(){
+				publisher.looseBranch <- true // Error here
+			}
+			log.Warn(fmt.Sprintf("(%s) branch.error: %s",branch.ID,  err.Error()))
 			case "info":
 			log.Info(fmt.Sprintf("(%s) sending info", publisher.ID))
 			conn.Write([]byte(fmt.Sprintf("%s;%s;%d;%d;%d;%s\n",
@@ -221,7 +222,7 @@ func (publisher *publisher) electionController() {
 				publisher.startHeadQuarter(ctx)
 			}else {
 				err := publisher.startBranch(ctx, hostInfo.host)
-				log.Warn(fmt.Sprintf("(%s) error on branch start: %s", publisher.ID, err.Error()))
+				log.Warn(fmt.Sprintf("(%s) finalizing branch state: %s", publisher.ID, err.Error()))
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
@@ -310,11 +311,11 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 			return fmt.Errorf("connection closed")
 		}
 		txtSpl := strings.Split(txt, ";")
-		if txtSpl[0] != "msg" {
+		if txtSpl[0] == "ok"{
 			continue
 		}
 
-		mark, err := publisher.book.Write([]byte(fmt.Sprintf("%s",txtSpl[2])))
+		mark, err := publisher.book.Write([]byte(fmt.Sprintf("%s;%s",txtSpl[3], txtSpl[4])))
 		if err != nil {
 			conn.Write([]byte("nok\n"))
 			return err
@@ -367,7 +368,7 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 			break L
 		}
 	}
-	log.Warn(fmt.Sprintf("(%s) reset all headquarter", publisher.ID))
+	log.Warn(fmt.Sprintf("(%s) reset headquarter", publisher.ID))
 	publisher.reset()
 }
 

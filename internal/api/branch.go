@@ -20,9 +20,9 @@ type branch struct {
 	controller    *publisher
 }
 
-func newBranch(ctx context.Context, lineSpl []string, c *publisher) *branch {
-	ctxWirtId := context.WithValue(ctx, "id", lineSpl[1])
-	withCancel, cancel := context.WithCancel(ctxWirtId)
+func newBranch(ctx context.Context, lineSpl []string, p *publisher) *branch {
+	p.gainBranch <- true
+	withCancel, cancel := context.WithCancel(ctx)
 
 	chapter, _ := strconv.ParseUint(lineSpl[2], 10, 64)
 	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
@@ -35,7 +35,7 @@ func newBranch(ctx context.Context, lineSpl []string, c *publisher) *branch {
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
 		cancel:     cancel,
-		controller: c,
+		controller: p,
 	}
 	return newBranch
 }
@@ -103,7 +103,7 @@ func (br *branch) Listen(conn net.Conn) error {
 						breakChapter = true
 					}
 
-					log.Info(fmt.Sprintf("branch.Listen.completed(%s): [%s]", br.ID, msg))
+					log.Info(fmt.Sprintf("(%s) branch.Listen.completed ID=%s: [%s]", br.controller.ID,  br.ID, msg))
 
 					if breakChapter {
 						break Chapter

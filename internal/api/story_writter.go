@@ -18,6 +18,7 @@ type storyWriter struct {
 }
 
 func newStoryWriter(ctx context.Context, conn net.Conn, c *publisher) *storyWriter {
+	log.Info(fmt.Sprintf("(%s) newStoryWriter", c.ID))
 	withCancel, cancel := context.WithCancel(ctx)
 	return &storyWriter{
 		conn: conn,

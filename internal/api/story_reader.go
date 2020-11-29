@@ -22,6 +22,7 @@ type storyReader struct {
 }
 
 func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyReader {
+	log.Info(fmt.Sprintf("(%s) newStoryReader with ID=%s", c.ID, lineSpl[1]))
 	withCancel, cancel := context.WithCancel(ctx)
 
 	chapter, _ := strconv.ParseUint(lineSpl[2], 10, 64)
