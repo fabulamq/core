@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/fabulamq/core/internal/entity"
 	"net"
 	"sync"
 )
@@ -9,7 +10,7 @@ import (
 func deployPublisher(c Config) *publisher {
 	chStatus := make(chan apiStatus)
 
-	book, err := startBook(bookConfig{
+	book, err := entity.StartBook(entity.BookConfig{
 		MaxLinerPerChapter: c.OffsetPerChapter,
 		Folder:             c.Folder,
 	})
@@ -31,7 +32,7 @@ func deployPublisher(c Config) *publisher {
 	if totalInstances == 1 {
 		return &publisher{
 			ID:              c.ID,
-			publisherKind:   Unique,
+			publisherKind:   entity.Unique,
 			Status:          chStatus,
 			book:            book,
 			weight:          c.Weight,
@@ -49,15 +50,15 @@ func deployPublisher(c Config) *publisher {
 	// read and decide
 
 	return &publisher{
-		ID:            c.ID,
-		Status:        chStatus,
-		publisherKind: Undefined,
-		book:          book,
-		weight:        c.Weight,
-		listener:      listener,
-		Hosts:         c.Hosts,
-		gainBranch:    make(chan bool),
-		looseBranch:   make(chan bool),
+		ID:              c.ID,
+		Status:          chStatus,
+		publisherKind:   entity.Undefined,
+		book:            book,
+		weight:          c.Weight,
+		listener:        listener,
+		Hosts:           c.Hosts,
+		gainBranch:      make(chan bool),
+		looseBranch:     make(chan bool),
 		promoteElection: make(chan bool),
 	}
 }

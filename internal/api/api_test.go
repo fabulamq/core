@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/fabulamq/core/internal/entity"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strings"
@@ -285,11 +286,11 @@ func TestMultipleReplicas(t *testing.T) {
 	for {
 		select {
 		case status := <-p1.Status:
-			if status.kind == HeadQuarter {
+			if status.kind == entity.HeadQuarter {
 				forceElection(p1)
 			}
 		case status := <-p2.Status:
-			if status.kind == HeadQuarter {
+			if status.kind == entity.HeadQuarter {
 				forceElection(p2)
 			}
 		case <-p3.Status:

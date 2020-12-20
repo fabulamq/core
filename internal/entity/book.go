@@ -1,4 +1,4 @@
-package api
+package entity
 
 import (
 	"bufio"
@@ -11,29 +11,29 @@ import (
 	"sync"
 )
 
-type book struct {
+type Book struct {
 	once    sync.Once
-	mark    *mark
+	Mark    *Mark
 	chapter *os.File
 	l       sync.Mutex
 	//
-	maxLinesPerChapter uint64
+	MaxLinesPerChapter uint64
 	Folder             string
 }
 
-type bookConfig struct {
+type BookConfig struct {
 	MaxLinerPerChapter uint64
 	Folder             string
 }
 
-func startBook(c bookConfig) (*book, error) {
+func StartBook(c BookConfig) (*Book, error) {
 	lastChapter := uint64(0)
 	hasBook := false
 
-	book := &book{
+	book := &Book{
 		once:               sync.Once{},
-		mark:               &mark{},
-		maxLinesPerChapter: c.MaxLinerPerChapter,
+		Mark:               &Mark{},
+		MaxLinesPerChapter: c.MaxLinerPerChapter,
 		Folder:             c.Folder,
 		l:                  sync.Mutex{},
 	}
@@ -72,9 +72,9 @@ func startBook(c bookConfig) (*book, error) {
 	if err != nil {
 		return nil, err
 	}
-	book.mark.line = offset + 1
+	book.Mark.line = offset + 1
 	book.chapter = file
-	book.mark.chapter = lastChapter
+	book.Mark.chapter = lastChapter
 	return book, nil
 }
 
@@ -88,7 +88,7 @@ func lineCounter(r *os.File) (uint64, error) {
 	return uint64(k), nil
 }
 
-func (b *book) newChapter(i uint64) error {
+func (b *Book) newChapter(i uint64) error {
 	file, err := os.Create(fmt.Sprintf("%s/%d.chapter", b.Folder, i))
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func (b *book) newChapter(i uint64) error {
 	return nil
 }
 
-func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
+func (b *Book) Read(chapter uint64) (chan *tail.Line, error) {
 	chapterName := fmt.Sprintf("%s/%d.chapter", b.Folder, chapter)
 
 	t, err := tail.TailFile(chapterName, tail.Config{
@@ -110,29 +110,29 @@ func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
 	return t.Lines, nil
 }
 
-func (b *book) Write(bs []byte) (*mark, error) {
+func (b *Book) Write(bs []byte) (*Mark, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {
 		return nil, err
 	}
-	b.mark.addLine()
-	if b.mark.getLine() == b.maxLinesPerChapter {
+	b.Mark.AddLine()
+	if b.Mark.GetLine() == b.MaxLinesPerChapter {
 		err = b.chapter.Close()
 		if err != nil {
 			return nil, err
 		}
-		b.mark.addChapter()
-		b.mark.resetLine()
-		err = b.newChapter(b.mark.getChapter())
+		b.Mark.AddChapter()
+		b.Mark.ResetLine()
+		err = b.newChapter(b.Mark.GetChapter())
 		if err != nil {
 			return nil, err
 		}
 	}
-	return b.mark, nil
+	return b.Mark, nil
 }
 
-func (b *book) Close(){
+func (b *Book) Close(){
 	b.chapter.Close()
 }

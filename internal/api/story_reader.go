@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/fabulamq/core/internal/entity"
 	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
@@ -15,9 +16,9 @@ type storyReader struct {
 	hasFinish chan bool
 	cancel    func()
 
-	mark mark
+	mark *entity.Mark
 
-	breakEvenMark mark
+	breakEvenMark *entity.Mark
 	controller    *publisher
 }
 
@@ -29,14 +30,8 @@ func newStoryReader(ctx context.Context, lineSpl []string, c *publisher) *storyR
 	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
 	newConsumer := &storyReader{
 		ID: lineSpl[1],
-		mark: mark{
-			chapter: chapter,
-			line:    line,
-		},
-		breakEvenMark: mark{
-			chapter: c.book.mark.getChapter(),
-			line:    c.book.mark.getLine(),
-		},
+		mark: entity.NewMark(chapter, line),
+		breakEvenMark: entity.NewMark(c.book.Mark.GetChapter(), c.book.Mark.GetLine()),
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
 		cancel:     cancel,
@@ -64,7 +59,7 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 	}
 
 	for {
-		tailLine, err := sr.controller.book.Read(sr.mark.chapter)
+		tailLine, err := sr.controller.book.Read(sr.mark.GetChapter())
 
 		if err != nil {
 			return err
@@ -76,7 +71,7 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 			case <-sr.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <-tailLine:
-				msg := []byte(fmt.Sprintf("msg;%d;%d;%t;%s", sr.mark.getChapter(), sr.mark.getLine(), sr.mark.isBefore(sr.breakEvenMark), line.Text))
+				msg := []byte(fmt.Sprintf("msg;%d;%d;%t;%s", sr.mark.GetChapter(), sr.mark.GetLine(), sr.mark.IsBefore(*sr.breakEvenMark), line.Text))
 				log.Info(fmt.Sprintf("storyReader.Listen.readLine(%s): [%s]",sr.ID, msg))
 				if err != nil {
 					return err
@@ -101,11 +96,11 @@ func (sr *storyReader) Listen(conn net.Conn) error {
 
 					breakChapter := false
 
-					sr.mark.addLine()
-					if sr.mark.getLine() == sr.controller.book.maxLinesPerChapter {
+					sr.mark.AddLine()
+					if sr.mark.GetLine() == sr.controller.book.MaxLinesPerChapter {
 						log.Info(fmt.Sprintf("storyReader.Listen.newChapter(%s)", sr.ID))
-						sr.mark.resetLine()
-						sr.mark.addChapter()
+						sr.mark.ResetLine()
+						sr.mark.AddChapter()
 						breakChapter = true
 					}
 

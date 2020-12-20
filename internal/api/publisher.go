@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"github.com/fabulamq/core/internal/entity"
 	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
@@ -15,11 +16,11 @@ import (
 type publisher struct {
 	ID            string
 	Status        chan apiStatus
-	publisherKind publisherKind
+	publisherKind entity.PublisherKind
 	HqUrl         string
 
 	locker   sync.Mutex
-	book     *book
+	book     *entity.Book
 	weight   int
 	listener net.Listener
 	// general locker
@@ -84,11 +85,11 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			case "info":
 			log.Info(fmt.Sprintf("(%s) sending info", publisher.ID))
 			conn.Write([]byte(fmt.Sprintf("%s;%s;%d;%d;%d;%s\n",
-				Undefined,
+				entity.Undefined,
 				publisher.ID,
 				publisher.weight,
-				publisher.book.mark.getChapter(),
-				publisher.book.mark.getLine(),
+				publisher.book.Mark.GetChapter(),
+				publisher.book.Mark.GetLine(),
 				publisher.publisherKind,
 			)))
 		}
@@ -97,7 +98,7 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 }
 
 func (publisher *publisher) reset() {
-	publisher.setPublisherKind(Undefined)
+	publisher.setPublisherKind(entity.Undefined)
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
 	publisher.storyReaderMap.Range(func(key, value interface{}) bool {
@@ -128,10 +129,10 @@ func (publisher *publisher) Stop() {
 func (publisher *publisher) acceptStoryReader()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == Unique || publisher.publisherKind == Branch {
+	if publisher.publisherKind == entity.Unique || publisher.publisherKind == entity.Branch {
 		return true
 	}
-	if publisher.publisherKind == HeadQuarter && publisher.quo() > 0.5 {
+	if publisher.publisherKind == entity.HeadQuarter && publisher.quo() > 0.5 {
 		return true
 	}
 	return false
@@ -140,7 +141,7 @@ func (publisher *publisher) acceptStoryReader()bool{
 func (publisher *publisher) isUndefined()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == Undefined {
+	if publisher.publisherKind == entity.Undefined {
 		return true
 	}
 	return false
@@ -149,7 +150,7 @@ func (publisher *publisher) isUndefined()bool{
 func (publisher *publisher) isHeadQuarter()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == HeadQuarter {
+	if publisher.publisherKind == entity.HeadQuarter {
 		return true
 	}
 	return false
@@ -158,7 +159,7 @@ func (publisher *publisher) isHeadQuarter()bool{
 func (publisher *publisher) isFundingAHeadQuarter()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == FundHeadQuarter {
+	if publisher.publisherKind == entity.FundHeadQuarter {
 		return true
 	}
 	return false
@@ -167,7 +168,7 @@ func (publisher *publisher) isFundingAHeadQuarter()bool{
 func (publisher *publisher) acceptStoryWriter()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == HeadQuarter || publisher.publisherKind == Unique {
+	if publisher.publisherKind == entity.HeadQuarter || publisher.publisherKind == entity.Unique {
 		return true
 	}
 	return false
@@ -176,14 +177,14 @@ func (publisher *publisher) acceptStoryWriter()bool{
 func (publisher *publisher) acceptBranch()bool{
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
-	if publisher.publisherKind == HeadQuarter || publisher.publisherKind == FundHeadQuarter {
+	if publisher.publisherKind == entity.HeadQuarter || publisher.publisherKind == entity.FundHeadQuarter {
 		return true
 	}
 	return false
 }
 
 
-func (publisher *publisher) setPublisherKind(pk publisherKind){
+func (publisher *publisher) setPublisherKind(pk entity.PublisherKind){
 	publisher.locker.Lock()
 	defer publisher.locker.Unlock()
 	publisher.publisherKind = pk
@@ -236,8 +237,8 @@ func (publisher *publisher) getHostsInfo() hostsInfo {
 		id:     publisher.ID,
 		host:   "local",
 		weight: publisher.weight,
-		mark:   publisher.book.mark,
-		kind:   Undefined,
+		mark:   publisher.book.Mark,
+		kind:   entity.Undefined,
 	}
 
 	for _, host := range publisher.Hosts {
@@ -271,13 +272,10 @@ func (publisher *publisher) getHostsInfo() hostsInfo {
 			}
 			hostsInfo[host] = hostInfo{
 				id:     id,
-				kind:   GetPublisherKind(txtSpl[5]),
+				kind:   entity.GetPublisherKind(txtSpl[5]),
 				host:   host,
 				weight: weight,
-				mark: &mark{
-					chapter: chapter,
-					line:    line,
-				},
+				mark:   entity.NewMark(chapter, line),
 			}
 		}
 	}
@@ -288,15 +286,15 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 	publisher.Status <- apiStatus{
 		Err:     nil,
 		IsReady: true,
-		kind:    Branch,
+		kind:    entity.Branch,
 	}
 	log.Info(fmt.Sprintf("(%s) startBranch", publisher.ID))
-	publisher.setPublisherKind(Branch)
+	publisher.setPublisherKind(entity.Branch)
 	conn, err := net.DialTimeout("tcp", hqUrl, time.Millisecond * 200)
 	if err != nil {
 		return err
 	}
-	_, err = conn.Write([]byte(fmt.Sprintf("branch;%s;%d;%d\n", publisher.ID, publisher.book.mark.chapter, publisher.book.mark.line)))
+	_, err = conn.Write([]byte(fmt.Sprintf("branch;%s;%d;%d\n", publisher.ID, publisher.book.Mark.GetChapter(), publisher.book.Mark.GetLine())))
 	if err != nil {
 		return err
 	}
@@ -320,7 +318,7 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 			conn.Write([]byte("nok\n"))
 			return err
 		}
-		publisher.book.mark = mark
+		publisher.book.Mark = mark
 		_, err = conn.Write([]byte("ok\n"))
 		if err != nil {
 			return err
@@ -331,12 +329,12 @@ func (publisher *publisher) startBranch(ctx context.Context, hqUrl string)error 
 
 func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 	log.Info(fmt.Sprintf("(%s) trying to stabilish a head quarter", publisher.ID))
-	publisher.setPublisherKind(FundHeadQuarter)
+	publisher.setPublisherKind(entity.FundHeadQuarter)
 
 	L: for {
 		select {
 		case <-time.After(5 * time.Second):
-			if publisher.publisherKind == HeadQuarter {
+			if publisher.publisherKind == entity.HeadQuarter {
 				continue
 			}
 			// finish
@@ -348,7 +346,7 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 				break L
 			}
 		case <- publisher.gainBranch:
-			if publisher.publisherKind == HeadQuarter {
+			if publisher.publisherKind == entity.HeadQuarter {
 				continue
 			}
 			log.Info(fmt.Sprintf("(%s) new branch on HQ, current quo=%v", publisher.ID, publisher.quo()))
@@ -358,10 +356,10 @@ func (publisher *publisher) startHeadQuarter(ctx context.Context) {
 			log.Info(fmt.Sprintf("(%s) start a new head quarter", publisher.ID))
 			publisher.Status <- apiStatus{
 				IsReady:      true,
-				kind:         HeadQuarter,
+				kind:         entity.HeadQuarter,
 				AcceptWriter: true,
 			}
-			publisher.setPublisherKind(HeadQuarter)
+			publisher.setPublisherKind(entity.HeadQuarter)
 		case <- publisher.promoteElection:
 			log.Info(fmt.Sprintf("(%s) promote new election", publisher.ID))
 			// promote new election

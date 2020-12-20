@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"github.com/fabulamq/core/internal/entity"
 	log "github.com/sirupsen/logrus"
 	"net"
 	"strconv"
@@ -15,7 +16,7 @@ type branch struct {
 	hasFinish chan bool
 	cancel    func()
 
-	mark mark
+	mark      *entity.Mark
 
 	controller    *publisher
 }
@@ -28,10 +29,7 @@ func newBranch(ctx context.Context, lineSpl []string, p *publisher) *branch {
 	line, _ := strconv.ParseUint(lineSpl[3], 10, 64)
 	newBranch := &branch{
 		ID: lineSpl[1],
-		mark: mark{
-			chapter: chapter,
-			line:    line,
-		},
+		mark: entity.NewMark(chapter, line),
 		hasFinish:  make(chan bool),
 		ctx:        withCancel,
 		cancel:     cancel,
@@ -59,7 +57,7 @@ func (br *branch) Listen(conn net.Conn) error {
 	}
 
 	for {
-		tailLine, err := br.controller.book.Read(br.mark.chapter)
+		tailLine, err := br.controller.book.Read(br.mark.GetChapter())
 
 		if err != nil {
 			return err
@@ -71,7 +69,7 @@ func (br *branch) Listen(conn net.Conn) error {
 			case <-br.ctx.Done():
 				return fmt.Errorf("done ctx")
 			case line := <-tailLine:
-				msg := []byte(fmt.Sprintf("msg;%d;%d;%s", br.mark.getChapter(), br.mark.getLine(), line.Text))
+				msg := []byte(fmt.Sprintf("msg;%d;%d;%s", br.mark.GetChapter(), br.mark.GetLine(), line.Text))
 				log.Info(fmt.Sprintf("(%s) branch.Listen.readLine: [%s]", br.ID, msg))
 				if err != nil {
 					return err
@@ -95,11 +93,11 @@ func (br *branch) Listen(conn net.Conn) error {
 
 					breakChapter := false
 
-					br.mark.addLine()
-					if br.mark.getLine() == br.controller.book.maxLinesPerChapter {
+					br.mark.AddLine()
+					if br.mark.GetLine() == br.controller.book.MaxLinesPerChapter {
 						log.Info(fmt.Sprintf("branch.Listen.newChapter(%s)", br.ID))
-						br.mark.resetLine()
-						br.mark.addChapter()
+						br.mark.ResetLine()
+						br.mark.AddChapter()
 						breakChapter = true
 					}
 

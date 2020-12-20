@@ -2,20 +2,21 @@ package api
 
 import (
 	"bytes"
+	"github.com/fabulamq/core/internal/entity"
 	"io"
 )
 
 type apiStatus struct {
 	Err          error
 	IsReady      bool
-	kind         publisherKind
+	kind         entity.PublisherKind
 	AcceptWriter bool
 }
 
 func Start(c Config) *publisher {
 	publisher := deployPublisher(c)
 
-	if publisher.publisherKind == Undefined {
+	if publisher.publisherKind == entity.Undefined {
 		publisher.electionController()
 	}
 
