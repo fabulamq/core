@@ -12,7 +12,6 @@ func main(){
 	path := flag.String("path", "", "folder")
 	port := flag.String("port", "9998", "port of application")
 	perPage := flag.Uint64("perPage", 100000, "Offset per page")
-	weight := flag.Int("weight", 100, "Priority rules")
 	flag.Parse()
 
 	hosts := make([]string, 0)
@@ -27,9 +26,7 @@ func main(){
 	api := api.Start(api.Config{
 		Folder: *path,
 		Port:  *port,
-		Hosts: hosts,
 		OffsetPerChapter: *perPage,
-		Weight: *weight,
 	})
 	L: for {
 		select{

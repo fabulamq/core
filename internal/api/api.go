@@ -8,16 +8,11 @@ import (
 type apiStatus struct {
 	Err          error
 	IsReady      bool
-	kind         publisherKind
 	AcceptWriter bool
 }
 
 func Start(c Config) *publisher {
 	publisher := deployPublisher(c)
-
-	if publisher.publisherKind == Undefined {
-		publisher.electionController()
-	}
 
 	// reader controller
 	go func() {
@@ -38,8 +33,7 @@ func Start(c Config) *publisher {
 type Config struct {
 	ID               string
 	Port             string
-	Weight           int
-	Hosts            []string
+	Host             string
 	Folder           string
 	OffsetPerChapter uint64
 }

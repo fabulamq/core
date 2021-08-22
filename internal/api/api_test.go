@@ -60,13 +60,14 @@ func TestMain(m *testing.M) {
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestDifferentChannelConsumers(t *testing.T) {
 	api := Start(Config{
+		Host:             "-",
 		Folder:           getPath(),
 		OffsetPerChapter: 50,
 	})
 	<- api.Status
 
 	{
-		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"-"}})
 		go func() {
 			for i := 0; i < 200; i++ {
 				if i == 105 {
@@ -82,7 +83,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	lastMsg := make(chan bool)
 
 	go func() { // 160 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 3 {
 				fmt.Println("error on ID 1")
@@ -94,7 +95,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 		lastMsg <- true
 	}()
 	go func() { // 50 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "2", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 0 && tail.Chapter == 1 {
 				fmt.Println("error on ID 2")
@@ -108,7 +109,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 
 	go func() { // wait, 105 lines
 		time.Sleep(1 * time.Second)
-		storyReader, err := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		storyReader, err := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "3", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
 		assert.NoError(t, err)
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 5 && tail.Chapter == 2 {
@@ -122,7 +123,7 @@ func TestDifferentChannelConsumers(t *testing.T) {
 	}()
 
 	go func() { // only read 5 lines
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "4", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Hosts: []string{"localhost:9998"}})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "4", Mark: gofabula.Mark{Chapter: 2, Line: 5}, Hosts: []string{"-"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 10 && tail.Chapter == 2 {
 				assert.Equal(t, "msg_105", tail.Message)
@@ -158,13 +159,14 @@ L:
 // go test -v ./... -p 1 -count=1 -run TestDifferentChannelConsumers -failfast -race
 func TestReadingFlow(t *testing.T) {
 	api := Start(Config{
+		Host:             "-",
 		Folder:           getPath(),
 		OffsetPerChapter: 10,
 	})
 	<- api.Status
 
 	{
-		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
+		p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"-"}})
 		go func() {
 			for i := 0; i < 400; i++ {
 				time.Sleep(10 * time.Millisecond)
@@ -177,7 +179,7 @@ func TestReadingFlow(t *testing.T) {
 	hasEnd := make(chan bool)
 
 	go func() {
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			fmt.Println("read here 1: ", tail.Chapter, tail.Line)
 			if tail.Line == 5 && tail.Chapter == 38 {
@@ -194,12 +196,13 @@ func TestReadingFlow(t *testing.T) {
 
 func TestReviewFunction(t *testing.T) {
 	api := Start(Config{
+		Host:             "-",
 		Folder:           getPath(),
 		OffsetPerChapter: 50,
 	})
 	<- api.Status
 
-	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9998"}})
+	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"-"}})
 	for i := 0; i < 5; i++ {
 		if i == 105 {
 			p.Write("topic-1", "msg_105")
@@ -211,7 +214,7 @@ func TestReviewFunction(t *testing.T) {
 	steps := make(chan bool)
 
 	go func() {
-		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"localhost:9998"}})
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
 		storyReader.Read(func(tail gofabula.FabulaTail) error {
 			if tail.Line == 4 {
 				steps <- true
@@ -229,72 +232,5 @@ func TestReviewFunction(t *testing.T) {
 
 }
 
-// go test -v ./... -p 1 -count=1 -run TestMultipleReplicas -failfast -race
-func TestMultipleReplicas(t *testing.T) {
-	p1 := Start(Config{
-		ID:               "1",
-		Port:             "9990",
-		Weight:           100,
-		Hosts:            []string{"localhost:9991", "localhost:9992"},
-		Folder:           getPathS1(),
-		OffsetPerChapter: 50,
-	})
-	p2 := Start(Config{
-		ID:               "2",
-		Port:             "9991",
-		Weight:           90,
-		Hosts:            []string{"localhost:9990", "localhost:9992"},
-		Folder:           getPathS2(),
-		OffsetPerChapter: 50,
-	})
-
-	p3 := Start(Config{
-		ID:               "3",
-		Port:             "9992",
-		Weight:           80,
-		Hosts:            []string{"localhost:9990", "localhost:9991"},
-		Folder:           getPathS3(),
-		OffsetPerChapter: 50,
-	})
-
-	forceElection := func(p *publisher) {
-		go func() {
-			time.Sleep(2 * time.Second)
-			p.PromoteElection()
-		}()
-	}
 
 
-	go func() {
-		for {
-			p, err := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"localhost:9990","localhost:9991","localhost:9992"}})
-			if err != nil {
-				continue
-			}
-			for {
-				time.Sleep(1 * time.Second)
-				_, err = p.Write("topic-1", generator.NewFooBar())
-				if err != nil {
-					break
-				}
-			}
-		}
-	}()
-
-
-	for {
-		select {
-		case status := <-p1.Status:
-			if status.kind == HeadQuarter {
-				forceElection(p1)
-			}
-		case status := <-p2.Status:
-			if status.kind == HeadQuarter {
-				forceElection(p2)
-			}
-		case <-p3.Status:
-		}
-}
-
-
-}
