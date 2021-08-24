@@ -2,7 +2,9 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"github.com/fabulamq/core/internal/mark"
 	"github.com/hpcloud/tail"
 	"os"
 	"path/filepath"
@@ -13,7 +15,7 @@ import (
 
 type book struct {
 	once    sync.Once
-	mark    *mark
+	mark    *mark.Mark
 	chapter *os.File
 	l       sync.Mutex
 	//
@@ -22,6 +24,7 @@ type book struct {
 }
 
 type bookConfig struct {
+	Name               string
 	MaxLinerPerChapter uint64
 	Folder             string
 }
@@ -32,7 +35,7 @@ func startBook(c bookConfig) (*book, error) {
 
 	book := &book{
 		once:               sync.Once{},
-		mark:               &mark{},
+		mark:               mark.NewMark(context.Background(), 0, 0),
 		maxLinesPerChapter: c.MaxLinerPerChapter,
 		Folder:             c.Folder,
 		l:                  sync.Mutex{},
@@ -72,9 +75,9 @@ func startBook(c bookConfig) (*book, error) {
 	if err != nil {
 		return nil, err
 	}
-	book.mark.line = offset + 1
+	book.mark.SetLine(offset + 1)
 	book.chapter = file
-	book.mark.chapter = lastChapter
+	book.mark.SetChapter(lastChapter)
 	return book, nil
 }
 
@@ -110,22 +113,22 @@ func (b *book) Read(chapter uint64) (chan *tail.Line, error) {
 	return t.Lines, nil
 }
 
-func (b *book) Write(bs []byte) (*mark, error) {
+func (b *book) Write(bs []byte) (*mark.Mark, error) {
 	b.l.Lock()
 	defer b.l.Unlock()
 	_, err := b.chapter.Write(append(bs, []byte("\n")...))
 	if err != nil {
 		return nil, err
 	}
-	b.mark.addLine()
-	if b.mark.getLine() == b.maxLinesPerChapter {
+	b.mark.AddLine()
+	if b.mark.GetLine() == b.maxLinesPerChapter {
 		err = b.chapter.Close()
 		if err != nil {
 			return nil, err
 		}
-		b.mark.addChapter()
-		b.mark.resetLine()
-		err = b.newChapter(b.mark.getChapter())
+		b.mark.AddChapter()
+		b.mark.ResetLine()
+		err = b.newChapter(b.mark.GetChapter())
 		if err != nil {
 			return nil, err
 		}

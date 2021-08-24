@@ -56,7 +56,7 @@ func (sw storyWriter) listen() error {
 				return err
 			}
 
-			err = write(sw.conn, []byte(fmt.Sprintf("ok;%d;%d", mark.getChapter(), mark.getLine())))
+			err = write(sw.conn, []byte(fmt.Sprintf("ok;%d;%d", mark.GetChapter(), mark.GetLine())))
 			if err != nil {
 				sw.publisher.locker.Unlock()
 				return err

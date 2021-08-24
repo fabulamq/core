@@ -219,7 +219,7 @@ func TestReviewFunction(t *testing.T) {
 			if tail.Line == 4 {
 				steps <- true
 			}
-			if !tail.Review && tail.Message == "here!" {
+			if tail.Message == "here!" {
 				steps <- true
 			}
 			return nil
@@ -232,5 +232,43 @@ func TestReviewFunction(t *testing.T) {
 
 }
 
+func TestSyncFunction(t *testing.T) {
+	api := Start(Config{
+		Host:             "-",
+		Folder:           getPath(),
+		OffsetPerChapter: 50,
+	})
+	<-api.Status
 
+	p, _ := gofabula.NewStoryWriter(gofabula.ConfigWriter{Hosts: []string{"-"}})
+	for i := 0; i < 5; i++ {
+		_, err := p.Write("topic-1", generator.NewFooBar())
+		assert.NoError(t, err)
+	}
+
+	wg := make(chan bool)
+
+	go func() {
+		wg <- true
+		mark, err := gofabula.Sync("1")
+		assert.NoError(t, err)
+		assert.Equal(t, 5, mark.Line)
+		wg <- true
+	}()
+
+	<- wg
+
+	go func() {
+		storyReader, _ := gofabula.NewStoryReader(gofabula.ConfigReader{ID: "1", Mark: gofabula.Mark{Chapter: 0, Line: 0}, Hosts: []string{"-"}})
+		err := storyReader.Read(func(tail gofabula.FabulaTail) error {
+			if tail.Line == 5 {
+				return nil
+			}
+			return nil
+		})
+		assert.NoError(t, err)
+	}()
+
+	<- wg
+}
 

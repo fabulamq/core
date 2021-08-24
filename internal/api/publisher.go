@@ -75,7 +75,9 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyReaderMap.Store(storyReader.ID, storyReader)
 			err := storyReader.Listen(conn)
 			publisher.storyReaderMap.Delete(storyReader.ID)
-			log.Warn("storyReader.error", err)
+			if err != nil {
+				log.Warn("storyReader.error", err)
+			}
 		case "sw":
 			if !publisher.acceptStoryWriter() {
 				break
@@ -84,7 +86,18 @@ func (publisher *publisher) acceptConn(conn net.Conn) {
 			publisher.storyWriterMap.Store(storyWriter.ID, storyWriter)
 			err := storyWriter.listen()
 			publisher.storyWriterMap.Delete(storyWriter.ID)
-			log.Warn(fmt.Sprintf("(%s) storyWriter.error: %s", publisher.ID ,err.Error()))
+			if err != nil {
+				log.Warn(fmt.Sprintf("(%s) storyWriter.error: %s", publisher.ID ,err))
+			}
+		case "sync":
+			if !publisher.acceptStoryReader() {
+				break
+			}
+			storySync := newStorySync(ctx, "",conn, publisher)
+			err := storySync.wait()
+			if err != nil {
+				log.Warn(fmt.Sprintf("(%s) storySync.error: %s", publisher.ID ,err))
+			}
 		}
 		conn.Close()
 	}()
