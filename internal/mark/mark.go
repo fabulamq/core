@@ -14,6 +14,8 @@ type Mark struct {
 	ctx     context.Context
 	listeners sync.Map
 
+	hasChange chan bool
+
 }
 
 func NewMark(ctx context.Context, chapter, line uint64)*Mark {
@@ -27,23 +29,35 @@ func NewMark(ctx context.Context, chapter, line uint64)*Mark {
 	return mark
 }
 
+func SyncMarks(bookMark Mark, readerMark *Mark){
 
-func (m *Mark) WaitForChange() bool{
+}
+
+type Sync struct {
+	id string
+	c  chan bool
+	m  *Mark
+}
+
+func (s *Sync) Close() {
+	s.m.listeners.Delete(s.id)
+	close(s.c)
+}
+
+func (s *Sync) WaitForChange() bool{
 	fmt.Println("WaitForChange")
-	uid := uuid.New().String()
-	chChange := make(chan bool)
-	m.listeners.Store(uid, chChange)
-	L: select {
-	case <- chChange:
-		fmt.Println("<- chChange")
-		break L
-	case <- m.ctx.Done():
-		break L
-	}
-	m.listeners.Delete(uid)
-	fmt.Println("break")
+	<- s.c
+	fmt.Println("WaitForChange.ok")
 	return true
 }
+
+func (m *Mark) NewSyncInstance() *Sync{
+	uid := uuid.New().String()
+	sync := &Sync{id: uid, m: m, c: make(chan bool)}
+	m.listeners.Store(uid, sync)
+	return sync
+}
+
 
 func (m *Mark) SetLine(val uint64) {
 	atomic.StoreUint64(&m.line, val)
@@ -55,8 +69,10 @@ func (m *Mark) SetChapter(val uint64) {
 
 func (m *Mark) syncListeners() {
 	m.listeners.Range(func(key, value interface{}) bool {
-		value.(chan bool) <- true
+		sync := value.(*Sync)
 		fmt.Println("syncListeners")
+		sync.c <- true
+		fmt.Println("syncListeners.ok")
 		return true
 	})
 }

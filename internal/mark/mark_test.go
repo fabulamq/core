@@ -6,11 +6,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestMarkSync(t *testing.T) {
 	mark := NewMark(context.Background(), 1, 1)
+	sync1 := mark.NewSyncInstance()
+	sync2 := mark.NewSyncInstance()
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -20,7 +21,7 @@ func TestMarkSync(t *testing.T) {
 
 	go func() {
 		wg.Done()
-		if mark.WaitForChange() {
+		if sync1.WaitForChange() {
 			assert.Equal(t, uint64(2), mark.line)
 			fmt.Println("1")
 			routineWg.Done()
@@ -29,7 +30,7 @@ func TestMarkSync(t *testing.T) {
 
 	go func() {
 		wg.Done()
-		if mark.WaitForChange() {
+		if sync2.WaitForChange() {
 			assert.Equal(t, uint64(2), mark.line)
 			fmt.Println("2")
 			routineWg.Done()
@@ -37,7 +38,7 @@ func TestMarkSync(t *testing.T) {
 	}()
 
 	wg.Wait()
-	time.Sleep(10 * time.Millisecond)
+	//time.Sleep(10 * time.Millisecond)
 	mark.AddLine()
 
 	routineWg.Wait()
