@@ -14,23 +14,18 @@ type storySync struct {
 }
 
 func (ss storySync) wait() error {
-	currentMark := ss.publisher.book.mark
+	bookMark := ss.publisher.book.mark.Static()
 	value, ok := ss.publisher.storyReaderMap.Load(ss.targetID)
 	if !ok {
 		return fmt.Errorf("no reader stored")
 	}
 	storyReader := value.(storyReader)
-
-	if storyReader.mark.IsEqual(*currentMark){
-		return write(ss.conn, []byte("msg;sync"))
+	err := storyReader.mark.SyncMarks(bookMark)
+	if err != nil {
+		write(ss.conn, []byte(`msg;{"sync": false}`))
+		return err
 	}
-
-	for{
-		select {
-		case <- storyReader.hasFinish:
-			return fmt.Errorf("stopped subscriber")
-		}
-	}
+	return write(ss.conn, []byte(`msg;{"sync": true}`))
 }
 
 func newStorySync(ctx context.Context, targetID string, conn net.Conn, p *publisher) *storySync {
