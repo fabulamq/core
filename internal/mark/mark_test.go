@@ -2,16 +2,17 @@ package mark
 
 import (
 	"context"
-	"fmt"
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMarkSync(t *testing.T) {
-	mark := NewMark(context.Background(), 1, 1)
-	sync1 := mark.NewSyncInstance()
-	sync2 := mark.NewSyncInstance()
+
+	bookMark1 := NewMark(context.Background(), 1, 4).Static()
+	bookMark2 := NewMark(context.Background(), 1, 5).Static()
+	reader := NewMark(context.Background(), 1, 2)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -21,25 +22,90 @@ func TestMarkSync(t *testing.T) {
 
 	go func() {
 		wg.Done()
-		if sync1.WaitForChange() {
-			assert.Equal(t, uint64(2), mark.line)
-			fmt.Println("1")
-			routineWg.Done()
-		}
+
+		reader.SyncMarks(bookMark1)
+		assert.Equal(t, uint64(4), reader.GetLine())
+		routineWg.Done()
 	}()
 
 	go func() {
 		wg.Done()
-		if sync2.WaitForChange() {
-			assert.Equal(t, uint64(2), mark.line)
-			fmt.Println("2")
-			routineWg.Done()
-		}
+
+		reader.SyncMarks(bookMark2)
+
+		assert.Equal(t, uint64(5), reader.GetLine())
+		routineWg.Done()
 	}()
 
+
 	wg.Wait()
-	//time.Sleep(10 * time.Millisecond)
-	mark.AddLine()
+	reader.AddLine()
+	time.Sleep(1 * time.Millisecond)
+	reader.AddLine()
+	time.Sleep(1 * time.Millisecond)
+	reader.AddLine()
+	time.Sleep(1 * time.Millisecond)
+
+	routineWg.Wait()
+}
+
+func TestMarkSyncWithExitContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	bookMark10 := NewMark(context.Background(), 1, 10).Static()
+	bookMark20 := NewMark(context.Background(), 1, 20).Static()
+	bookMark50 := NewMark(context.Background(), 1, 50).Static()
+	bookMark80 := NewMark(context.Background(), 1, 80).Static()
+	reader := NewMark(ctx, 1, 1)
+
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	var routineWg sync.WaitGroup
+	routineWg.Add(4)
+
+	go func() {
+		wg.Done()
+
+		err := reader.SyncMarks(bookMark10)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(10), reader.GetLine())
+		routineWg.Done()
+	}()
+	go func() {
+		wg.Done()
+
+		err := reader.SyncMarks(bookMark20)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(20), reader.GetLine())
+		routineWg.Done()
+	}()
+	go func() {
+		wg.Done()
+
+		err := reader.SyncMarks(bookMark50)
+		assert.NoError(t, err)
+		assert.Equal(t, uint64(50), reader.GetLine())
+		routineWg.Done()
+	}()
+	go func() {
+		wg.Done()
+
+		err := reader.SyncMarks(bookMark80)
+		assert.Error(t, err)
+		routineWg.Done()
+	}()
+
+
+	wg.Wait()
+
+	for {
+		reader.AddLine()
+		time.Sleep(1 * time.Millisecond)
+		if reader.GetLine() == 70 {
+			cancel()
+			break
+		}
+	}
 
 	routineWg.Wait()
 }
